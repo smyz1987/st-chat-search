@@ -522,21 +522,6 @@ import { power_user } from '../../../power-user.js';
     }
 
     // ---------- 跳转 ----------
-    function waitForMesid(mesid, timeoutMs) {
-        return new Promise(resolve => {
-            const t0 = Date.now();
-            const timer = setInterval(() => {
-                if (document.querySelector('.mes[mesid="' + mesid + '"]')) {
-                    clearInterval(timer);
-                    resolve(true);
-                } else if (Date.now() - t0 > timeoutMs) {
-                    clearInterval(timer);
-                    resolve(false);
-                }
-            }, 200);
-        });
-    }
-
     // 清空当前渲染的消息DOM（保留聊天数据），避免重复渲染
     function clearRendered() {
         document.querySelectorAll('#chat .mes, #show_more_messages').forEach(el => el.remove());
@@ -654,6 +639,48 @@ import { power_user } from '../../../power-user.js';
     }
 
     let jumping = false; // 防止重复跳转叠加导致 ST 渲染冲突
+    // 定位目标楼：ST getChat() 会无条件 shift 首行作 header（chat 数组纯消息、mesid 从 0 起），
+    // 旧聊天文件 header 若缺 chat_metadata 字段会导致 msgIndex 与渲染 mesid 偏差 ±1，故多候选查找
+    function findMesidCandidates(base) {
+        const cands = [base, base + 1, base - 1].filter(c => c >= 0);
+        for (const c of cands) {
+            if (document.querySelector('.mes[mesid="' + c + '"]')) return c;
+        }
+        return -1;
+    }
+    function waitMesidAny(candidates, timeoutMs) {
+        return new Promise(resolve => {
+            const t0 = Date.now();
+            const timer = setInterval(() => {
+                for (const c of candidates) {
+                    if (document.querySelector('.mes[mesid="' + c + '"]')) {
+                        clearInterval(timer);
+                        resolve(c);
+                        return;
+                    }
+                }
+                if (Date.now() - t0 > timeoutMs) {
+                    clearInterval(timer);
+                    resolve(-1);
+                }
+            }, 200);
+        });
+    }
+
+    // 等待目标消息内容渲染完成（mes_text 非空），避免滚动定位到"卡成代码"的未渲染消息
+    function waitMesText(mesEl, timeoutMs) {
+        return new Promise(resolve => {
+            const mt = mesEl.querySelector('.mes_text');
+            if (mt && mt.textContent.trim().length > 0) { resolve(true); return; }
+            const t0 = Date.now();
+            const timer = setInterval(() => {
+                const mt2 = mesEl.querySelector('.mes_text');
+                if (mt2 && mt2.textContent.trim().length > 0) { clearInterval(timer); resolve(true); }
+                else if (Date.now() - t0 > timeoutMs) { clearInterval(timer); resolve(false); }
+            }, 200);
+        });
+    }
+
     async function jumpTo(r) {
         if (jumping) {
             toastr.info('正在跳转中，请稍候', EXT_NAME);
@@ -696,12 +723,14 @@ import { power_user } from '../../../power-user.js';
 
             // 等聊天数据渲染出来再重定位，避免过早渲染空列表
             await waitForChatReady(10000);
+            // 给 ST 一点渲染稳定时间（消息内容/状态栏渲染完，避免"卡成代码"）
+            await new Promise(res => setTimeout(res, 600));
 
-            // 先直接查目标楼（ST 原生渲染范围内通常已有，不打扰 ST 渲染流程/状态栏）；
-            // 只有目标楼在未渲染的旧消息里（聊天被截断）才临时补渲染一次
-            let el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
-            let ok = !!el;
-            if (!el && typeof redisplayChat === 'function') {
+            // 先直接查目标楼（含 ±1 偏移修正）；未渲染（截断）时才补渲染一次
+            const candidates = [r.msgIndex, r.msgIndex + 1, r.msgIndex - 1].filter(c => c >= 0);
+            let actualMesid = findMesidCandidates(r.msgIndex);
+
+            if (actualMesid < 0 && typeof redisplayChat === 'function') {
                 const savedTruncation = (typeof power_user !== 'undefined') ? power_user.chat_truncation : 0;
                 try {
                     power_user.chat_truncation = 0;
@@ -716,11 +745,13 @@ import { power_user } from '../../../power-user.js';
                 if (typeof power_user !== 'undefined') {
                     power_user.chat_truncation = savedTruncation;
                 }
-                ok = await waitForMesid(r.msgIndex, 12000);
-                el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
+                actualMesid = await waitMesidAny(candidates, 12000);
             }
 
+            let el = actualMesid >= 0 ? document.querySelector('.mes[mesid="' + actualMesid + '"]') : null;
             if (el) {
+                // 等消息内容渲染完成（避免"卡成代码"），再定位
+                await waitMesText(el, 6000);
                 // 长消息（如代码/大段文本）定位到消息开头，避免落在中间看不到上下文；
                 // 普通消息定位到视口中央；滚动保底用同样的定位方式，防止被拉回中间
                 const textLen = (el.textContent || '').length;
@@ -728,19 +759,19 @@ import { power_user } from '../../../power-user.js';
                 el.scrollIntoView({ behavior: 'auto', block: blockMode });
                 el.classList.add('chat-search-flash');
                 setTimeout(() => el.classList.remove('chat-search-flash'), 3000);
-            }
-            // 滚动保底：持续纠正 ST 渲染流程导致的回顶，8 秒内稳定停住
-            if (el) {
-                startScrollGuard(r.msgIndex, 8000, blockMode);
+                // 滚动保底：持续纠正 ST 渲染流程导致的回顶，8 秒内稳定停住
+                startScrollGuard(actualMesid, 8000, blockMode);
             }
 
-            // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启（仅跳转成功时）
-            if (ok) toggleKwHighlight();
-
-            if (!ok) {
-                toastr.info('已打开该聊天，但没找到目标楼层（可能被合并/删除）', EXT_NAME);
+            if (actualMesid >= 0) {
+                if (actualMesid !== r.msgIndex) {
+                    console.warn('[chat-search] 楼层偏移修正 ' + r.msgIndex + '→' + actualMesid);
+                }
+                // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启（仅跳转成功时）
+                toggleKwHighlight();
+                toastr.success('已跳转到「' + r.charName + '」第 ' + (actualMesid + 1) + ' 楼', EXT_NAME);
             } else {
-                toastr.success('已跳转到「' + r.charName + '」第 ' + (r.msgIndex + 1) + ' 楼', EXT_NAME);
+                toastr.info('已打开该聊天，但没找到目标楼层（可能被合并/删除）', EXT_NAME);
             }
             closeModal();
         } catch (e) {
