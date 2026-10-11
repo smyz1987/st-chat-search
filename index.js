@@ -693,7 +693,10 @@ import { power_user } from '../../../power-user.js';
             const ok = await waitForMesid(r.msgIndex, 12000);
             const el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
             if (el) {
-                el.scrollIntoView({ behavior: 'auto', block: 'center' });
+                // 长消息（如代码/大段文本）定位到消息开头，避免落在中间看不到上下文；
+                // 普通消息定位到视口中央
+                const textLen = (el.textContent || '').length;
+                el.scrollIntoView({ behavior: 'auto', block: textLen > 4000 ? 'start' : 'center' });
                 el.classList.add('chat-search-flash');
                 setTimeout(() => el.classList.remove('chat-search-flash'), 3000);
             }
@@ -707,6 +710,8 @@ import { power_user } from '../../../power-user.js';
 
             if (!ok) {
                 toastr.info('已打开该聊天，但没找到目标楼层（可能被合并/删除）', EXT_NAME);
+            } else {
+                toastr.success('已跳转到「' + r.charName + '」第 ' + (r.msgIndex + 1) + ' 楼', EXT_NAME);
             }
             closeModal();
         } catch (e) {
