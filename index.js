@@ -298,7 +298,7 @@ import { power_user } from '../../../power-user.js';
     let resultPage = 1;         // 当前页码
     const RESULT_PAGE_SIZE = 6; // 每页最多 6 个角色分组
     const RESULT_GROUP_LIMIT = 6; // 单个角色展开后最多显示 6 条
-    let collapsedChars = new Set(); // 已折叠的角色名
+    let expandedChars = new Set(); // 已展开的角色名（默认全部折叠）
 
     function renderResults(results, elapsed) {
         const listEl = document.getElementById('chat-search-results');
@@ -329,6 +329,7 @@ import { power_user } from '../../../power-user.js';
         });
         resultGroups = groups;
         resultPage = 1;
+        expandedChars = new Set(); // 新搜索默认全部折叠
         renderGroupPage();
     }
 
@@ -358,20 +359,20 @@ import { power_user } from '../../../power-user.js';
         const pageGroups = resultGroups.slice(start, start + RESULT_PAGE_SIZE);
 
         const html = pageGroups.map(g => {
-            const collapsed = collapsedChars.has(g.charName);
-            const shown = collapsed ? [] : g.items.slice(0, RESULT_GROUP_LIMIT);
-            const more = collapsed ? 0 : g.items.length - shown.length;
+            const expanded = expandedChars.has(g.charName);
+            const shown = expanded ? g.items.slice(0, RESULT_GROUP_LIMIT) : [];
+            const more = expanded ? g.items.length - shown.length : 0;
             return '<div class="cs-group" data-char="' + escAttr(g.charName) + '">' +
-                '<div class="cs-group-head' + (collapsed ? '' : ' open') + '" title="点击展开/收起该角色的命中记录">' +
-                '<span class="cs-group-arrow">' + (collapsed ? '▶' : '▼') + '</span>' +
+                '<div class="cs-group-head' + (expanded ? ' open' : '') + '" title="点击展开/收起该角色的命中记录">' +
+                '<span class="cs-group-arrow">' + (expanded ? '▼' : '▶') + '</span>' +
                 '<span class="cs-char">' + escHtml(g.charName) + '</span>' +
                 '<span class="cs-group-count">' + g.items.length + ' 条命中</span>' +
                 '</div>' +
-                (collapsed ? '' :
+                (expanded ?
                     '<div class="cs-group-body">' +
                     shown.map(itemHtml).join('') +
                     (more > 0 ? '<div class="cs-group-more">该角色共 ' + g.items.length + ' 条命中，仅显示前 ' + RESULT_GROUP_LIMIT + ' 条，可用更精确的关键词缩小范围</div>' : '') +
-                    '</div>') +
+                    '</div>' : '') +
                 '</div>';
         }).join('');
 
@@ -386,8 +387,8 @@ import { power_user } from '../../../power-user.js';
         listEl.querySelectorAll('.cs-group-head').forEach(el => {
             el.addEventListener('click', () => {
                 const charName = el.closest('.cs-group').getAttribute('data-char');
-                if (collapsedChars.has(charName)) collapsedChars.delete(charName);
-                else collapsedChars.add(charName);
+                if (expandedChars.has(charName)) expandedChars.delete(charName);
+                else expandedChars.add(charName);
                 renderGroupPage();
             });
         });
@@ -573,6 +574,40 @@ import { power_user } from '../../../power-user.js';
         }
     }
 
+    // 等待聊天界面渲染出消息（切换角色后数据异步加载，别太早重渲染）
+    function waitForChatReady(timeoutMs) {
+        return new Promise(resolve => {
+            const t0 = Date.now();
+            const timer = setInterval(() => {
+                if (document.querySelector('#chat .mes')) {
+                    clearInterval(timer);
+                    resolve(true);
+                } else if (Date.now() - t0 > timeoutMs) {
+                    clearInterval(timer);
+                    resolve(false);
+                }
+            }, 250);
+        });
+    }
+
+    // 滚动保底：ST 异步渲染/截断恢复可能把滚动位置拉回顶部，持续纠正一段时间
+    function startScrollGuard(mesid, durationMs) {
+        const t0 = Date.now();
+        const timer = setInterval(() => {
+            const el = document.querySelector('.mes[mesid="' + mesid + '"]');
+            const chat = document.getElementById('chat');
+            if (el && chat) {
+                const rect = el.getBoundingClientRect();
+                const cRect = chat.getBoundingClientRect();
+                // 目标完全滚出消息区视口时才纠正，避免过度抖动
+                if (rect.top < cRect.top - 40 || rect.bottom > cRect.bottom + 40) {
+                    el.scrollIntoView({ behavior: 'auto', block: 'center' });
+                }
+            }
+            if (Date.now() - t0 > durationMs) clearInterval(timer);
+        }, 800);
+    }
+
     async function jumpTo(r) {
         try {
             ctx = window.SillyTavern.getContext();
@@ -586,6 +621,9 @@ import { power_user } from '../../../power-user.js';
                 await ctx.selectCharacterById(idx);
             }
             await ctx.openCharacterChat(r.chatFile);
+
+            // 等聊天数据渲染出来再重定位，避免过早渲染空列表
+            await waitForChatReady(10000);
 
             // 目标楼层可能在未渲染的旧消息里：临时关截断，一次性从目标前几楼渲染，
             // 只渲染一次，避免二次重渲染导致滚动位置丢失（跳回 0 楼）
@@ -608,18 +646,13 @@ import { power_user } from '../../../power-user.js';
             const ok = await waitForMesid(r.msgIndex, 12000);
             const el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
             if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.scrollIntoView({ behavior: 'auto', block: 'center' });
                 el.classList.add('chat-search-flash');
                 setTimeout(() => el.classList.remove('chat-search-flash'), 3000);
-                // 兜底：smooth 滚动偶尔会被 ST 渲染流程覆盖，延迟后再强制定位一次
-                setTimeout(() => {
-                    const el2 = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
-                    if (el2) {
-                        el2.scrollIntoView({ behavior: 'auto', block: 'center' });
-                        el2.classList.add('chat-search-flash');
-                        setTimeout(() => el2.classList.remove('chat-search-flash'), 3000);
-                    }
-                }, 400);
+            }
+            // 滚动保底：持续纠正 ST 渲染流程导致的回顶，8 秒内稳定停住
+            if (el) {
+                startScrollGuard(r.msgIndex, 8000);
             }
 
             // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启
