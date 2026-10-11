@@ -740,9 +740,9 @@ import { power_user } from '../../../power-user.js';
                 }
             }
 
-            // 快速定位：目标楼周围 ±10 条内足够（不等全量渲染，大幅提速）。
+            // 快速定位：目标楼周围 ±5 条内足够（渲染量最小化 → 更快，实测明显提速）。
             // 1) 先轮询 ST 原生渲染：目标楼靠前时第一批就会出现，直接命中；
-            // 2) 1.5s 内未出现（目标楼靠后/被截断）→ 只渲染目标楼前后各 10 条（跳过前面大量消息）
+            // 2) 800ms 内未出现（目标楼靠后/被截断）→ 只渲染目标楼前后各 5 条（跳过前面大量消息）
             let el = null;
             let actualMesid = -1;
             let fastRendered = false;
@@ -757,10 +757,10 @@ import { power_user } from '../../../power-user.js';
                         try {
                             power_user.chat_truncation = 0;
                             clearRendered();
-                            const startIndex = Math.max(0, r.msgIndex - 10);
+                            const startIndex = Math.max(0, r.msgIndex - 5);
                             await withTimeout(redisplayChat({ startIndex: startIndex, fade: false }), 12000, '渲染聊天');
-                            // 只保留目标楼周围 ±10 条（渲染量最小化 → 跳转快）
-                            const endMesid = r.msgIndex + 10;
+                            // 只保留目标楼周围 ±5 条（渲染量最小化 → 跳转快）
+                            const endMesid = r.msgIndex + 5;
                             document.querySelectorAll('#chat .mes').forEach(m => {
                                 if (Number(m.getAttribute('mesid')) > endMesid) m.remove();
                             });
