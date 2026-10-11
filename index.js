@@ -628,7 +628,7 @@ import { power_user } from '../../../power-user.js';
     }
 
     // 滚动保底：ST 异步渲染/截断恢复可能把滚动位置拉回顶部，持续纠正一段时间
-    function startScrollGuard(mesid, durationMs) {
+    function startScrollGuard(mesid, durationMs, blockMode) {
         const t0 = Date.now();
         const timer = setInterval(() => {
             const el = document.querySelector('.mes[mesid="' + mesid + '"]');
@@ -638,7 +638,7 @@ import { power_user } from '../../../power-user.js';
                 const cRect = chat.getBoundingClientRect();
                 // 目标完全滚出消息区视口时才纠正，避免过度抖动
                 if (rect.top < cRect.top - 40 || rect.bottom > cRect.bottom + 40) {
-                    el.scrollIntoView({ behavior: 'auto', block: 'center' });
+                    el.scrollIntoView({ behavior: 'auto', block: blockMode || 'center' });
                 }
             }
             if (Date.now() - t0 > durationMs) clearInterval(timer);
@@ -694,15 +694,16 @@ import { power_user } from '../../../power-user.js';
             const el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
             if (el) {
                 // 长消息（如代码/大段文本）定位到消息开头，避免落在中间看不到上下文；
-                // 普通消息定位到视口中央
+                // 普通消息定位到视口中央；滚动保底用同样的定位方式，防止被拉回中间
                 const textLen = (el.textContent || '').length;
-                el.scrollIntoView({ behavior: 'auto', block: textLen > 4000 ? 'start' : 'center' });
+                const blockMode = textLen > 4000 ? 'start' : 'center';
+                el.scrollIntoView({ behavior: 'auto', block: blockMode });
                 el.classList.add('chat-search-flash');
                 setTimeout(() => el.classList.remove('chat-search-flash'), 3000);
             }
             // 滚动保底：持续纠正 ST 渲染流程导致的回顶，8 秒内稳定停住
             if (el) {
-                startScrollGuard(r.msgIndex, 8000);
+                startScrollGuard(r.msgIndex, 8000, blockMode);
             }
 
             // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启（仅跳转成功时）
