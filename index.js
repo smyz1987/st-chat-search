@@ -1407,6 +1407,16 @@ import { power_user } from '../../../power-user.js';
         });
     }
 
+    // 按钮显隐轮询兜底：某些 ST 版本/场景下 MutationObserver 对 style 变化不可靠，
+    // 用轻量定时检查（幂等，buildButton 状态未变时零开销返回），保证弹窗开/关按钮显隐始终正确
+    let visTimer = null;
+    function startVisibilityWatch() {
+        if (visTimer) return;
+        visTimer = setInterval(() => {
+            try { buildButton(); } catch (e) { /* 忽略 */ }
+        }, 800);
+    }
+
     // ---------- 缓存失效 ----------
     function invalidateCurrent() {
         try {
@@ -1426,6 +1436,7 @@ import { power_user } from '../../../power-user.js';
         buildStyle();
         buildButton();
         watchAnchors();
+        startVisibilityWatch();
         const ET = ctx.eventTypes;
         try {
             ctx.eventSource.on(ET.MESSAGE_SENT, invalidateCurrent);
