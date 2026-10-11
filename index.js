@@ -1350,10 +1350,10 @@ import { power_user } from '../../../power-user.js';
             document.body.appendChild(btn);
         }
         // 聊天历史弹窗打开时：按钮隐藏（不占空间，回到首页/关弹窗自动恢复）
+        // 注：ST 1.18 的 #shadow_select_chat_popup 常态 display:none（不是显隐开关），
+        // 只依据 #select_chat_popup 自身的 display 判断弹窗是否打开
         const popup = document.getElementById('select_chat_popup');
-        const popupShadow = document.getElementById('shadow_select_chat_popup');
-        const popupOpen = popup && getComputedStyle(popup).display !== 'none'
-            && (!popupShadow || getComputedStyle(popupShadow).display !== 'none');
+        const popupOpen = popup && getComputedStyle(popup).display !== 'none';
         if (popupOpen) {
             btn.style.display = 'none';
             btn.style.cssText = '';
