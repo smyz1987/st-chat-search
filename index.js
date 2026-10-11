@@ -1389,6 +1389,7 @@ import { power_user } from '../../../power-user.js';
     }
 
     // 欢迎页/聊天弹窗是异步渲染的，监听 DOM 变化保持按钮挂在对的位置
+    // （含 style/class 属性变化：弹窗 display 切换不产生节点增删，但必须重新判断按钮显隐）
     let anchorObserver = null;
     function watchAnchors() {
         if (anchorObserver) return;
@@ -1400,7 +1401,12 @@ import { power_user } from '../../../power-user.js';
                 buildButton();
             }, 400);
         });
-        anchorObserver.observe(document.body, { childList: true, subtree: true });
+        anchorObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class'],
+        });
     }
 
     // ---------- 缓存失效 ----------
