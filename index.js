@@ -216,7 +216,6 @@ import { power_user } from '../../../power-user.js';
     function searchLines(lines, frags, opts) {
         if (!Array.isArray(lines) || frags.length === 0) return [];
         const excludeUser = !!(opts && opts.excludeUser);
-        const hasMeta = lines[0] && typeof lines[0] === 'object' && lines[0].chat_metadata;
         const hits = [];
         for (let i = 0; i < lines.length; i++) {
             const m = lines[i];
@@ -239,7 +238,10 @@ import { power_user } from '../../../power-user.js';
                 }
             }
             if (!matched) continue;
-            const msgIndex = hasMeta ? i - 1 : i;
+            // ST getChat() 无条件 shift 首行作 header（chat 数组从文件第 2 行起、mesid 从 0 起）
+            // → 渲染 mesid = 文件行索引 - 1（无论首行是 header 还是消息都会被吃掉，故 <0 的行不可跳转）
+            const msgIndex = i - 1;
+            if (msgIndex < 0) continue;
             hits.push({
                 msgIndex: msgIndex,
                 speaker: m.name || (m.is_user ? '用户' : '角色'),
@@ -639,13 +641,9 @@ import { power_user } from '../../../power-user.js';
     }
 
     let jumping = false; // 防止重复跳转叠加导致 ST 渲染冲突
-    // 定位目标楼：ST getChat() 会无条件 shift 首行作 header（chat 数组纯消息、mesid 从 0 起），
-    // 旧聊天文件 header 若缺 chat_metadata 字段会导致 msgIndex 与渲染 mesid 偏差 ±1，故多候选查找
+    // 定位目标楼：只按精确 mesid 查找（ST getChat() 无条件 shift 首行作 header，msgIndex 已按 i-1 计算）
     function findMesidCandidates(base) {
-        const cands = [base, base + 1, base - 1].filter(c => c >= 0);
-        for (const c of cands) {
-            if (document.querySelector('.mes[mesid="' + c + '"]')) return c;
-        }
+        if (base >= 0 && document.querySelector('.mes[mesid="' + base + '"]')) return base;
         return -1;
     }
     function waitMesidAny(candidates, timeoutMs) {
@@ -726,8 +724,9 @@ import { power_user } from '../../../power-user.js';
             // 给 ST 一点渲染稳定时间（消息内容/状态栏渲染完，避免"卡成代码"）
             await new Promise(res => setTimeout(res, 600));
 
-            // 先直接查目标楼（含 ±1 偏移修正）；未渲染（截断）时才补渲染一次
-            const candidates = [r.msgIndex, r.msgIndex + 1, r.msgIndex - 1].filter(c => c >= 0);
+            // 只按精确 mesid 定位：ST getChat 无条件 shift 首行 → 渲染 mesid = 搜索行索引-1（msgIndex 已含此修正）。
+            // 不猜 ±1 候选：目标楼在未渲染区（截断）时 ±1 会误匹配上一楼/下一楼导致跳错楼层。
+            const candidates = [r.msgIndex];
             let actualMesid = findMesidCandidates(r.msgIndex);
 
             if (actualMesid < 0 && typeof redisplayChat === 'function') {
