@@ -340,7 +340,6 @@ import { power_user } from '../../../power-user.js';
     let resultGroups = [];      // [{ charName, items: [result,...] }]
     let resultPage = 1;         // 当前页码
     const RESULT_PAGE_SIZE = 6; // 每页最多 6 个角色分组
-    const RESULT_GROUP_LIMIT = 6; // 单个角色展开后最多显示 6 条
     let expandedChars = new Set(); // 已展开的角色名（默认全部折叠）
 
     function renderResults(results, elapsed) {
@@ -403,8 +402,8 @@ import { power_user } from '../../../power-user.js';
 
         const html = pageGroups.map(g => {
             const expanded = expandedChars.has(g.charName);
-            const shown = expanded ? g.items.slice(0, RESULT_GROUP_LIMIT) : [];
-            const more = expanded ? g.items.length - shown.length : 0;
+            // 展开后显示该角色全部命中（列表可滑动查看），不再限制条数
+            const shown = expanded ? g.items : [];
             return '<div class="cs-group" data-char="' + escAttr(g.charName) + '">' +
                 '<div class="cs-group-head' + (expanded ? ' open' : '') + '" title="点击展开/收起该角色的命中记录">' +
                 '<span class="cs-group-arrow">' + (expanded ? '▼' : '▶') + '</span>' +
@@ -414,7 +413,6 @@ import { power_user } from '../../../power-user.js';
                 (expanded ?
                     '<div class="cs-group-body">' +
                     shown.map(itemHtml).join('') +
-                    (more > 0 ? '<div class="cs-group-more">该角色共 ' + g.items.length + ' 条命中，仅显示前 ' + RESULT_GROUP_LIMIT + ' 条，可用更精确的关键词缩小范围</div>' : '') +
                     '</div>' : '') +
                 '</div>';
         }).join('');
@@ -1124,7 +1122,7 @@ import { power_user } from '../../../power-user.js';
 }
 .cs-group-body { padding:2px 6px 6px; }
 .cs-group-body .cs-item { margin:4px 0; }
-.cs-group-more { padding:6px 10px; font-size:12px; opacity:.65; }
+.cs-group-more { padding:6px 10px; font-size:12px; opacity:.65; display:none; }
 .cs-pager {
     display:flex; align-items:center; justify-content:center; gap:10px;
     padding:10px 0 4px; flex-wrap:wrap;
