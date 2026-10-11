@@ -33,6 +33,8 @@ import { power_user } from '../../../power-user.js';
     let selectedChars = new Set();
     let excludeUser = false;
     let favorites = [];   // [{avatar, charName, chatFile, msgIndex, snippet, favTime}]
+    let lastSearchKeyword = '';   // 最近一次搜索的关键词（用于跳转后的金色高亮）
+    let kwHighlightOn = false;    // 金色关键词高亮开关（再次点击结果时关闭）
 
     // ---------- 工具 ----------
     function loadJson(key, def) {
@@ -217,6 +219,7 @@ import { power_user } from '../../../power-user.js';
     async function doSearch(keyword) {
         if (searching) return;
         searching = true;
+        lastSearchKeyword = keyword;
         // 每次搜索前刷新上下文（角色列表是页面加载后异步填充的）
         ctx = window.SillyTavern.getContext();
         const frags = keyword.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -226,15 +229,18 @@ import { power_user } from '../../../power-user.js';
             return;
         }
         // 角色列表可能还在加载，最多等 12 秒
-        let chars = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none' && Number(c.chat_size) > 0);
-        for (let w = 0; w < 24 && chars.length === 0; w++) {
+        let allChars = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none');
+        for (let w = 0; w < 24 && allChars.length === 0; w++) {
             await new Promise(res => setTimeout(res, 500));
             ctx = window.SillyTavern.getContext();
-            chars = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none' && Number(c.chat_size) > 0);
+            allChars = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none');
         }
-        // 角色筛选：选中了角色就只搜这些角色，否则搜全部
+        // 角色筛选：选中了角色就只搜这些角色（同名卡一起选中的都在集合里，含无聊天卡也快速跳过），
+        // 否则只扫有聊天记录的角色，跳过无聊天角色省时间
         const selected = getSelectedChars();
-        const targets = selected.size > 0 ? chars.filter(c => selected.has(c.avatar)) : chars;
+        const targets = selected.size > 0
+            ? allChars.filter(c => selected.has(c.avatar))
+            : allChars.filter(c => Number(c.chat_size) > 0);
         const results = [];
         let scanned = 0;
         setProgress('正在扫描 0/' + targets.length + ' 个角色…');
@@ -498,6 +504,75 @@ import { power_user } from '../../../power-user.js';
         document.querySelectorAll('#chat .mes, #show_more_messages').forEach(el => el.remove());
     }
 
+    // ---------- 关键词金色高亮 ----------
+    // 在聊天消息的文本节点里把关键词包成金色 span（保留 ST 原有 HTML 结构）
+    function applyKwHighlight(kw) {
+        if (!kw) return;
+        const frags = kw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (frags.length === 0) return;
+        const chat = document.getElementById('chat');
+        if (!chat) return;
+        const walker = document.createTreeWalker(chat, NodeFilter.SHOW_TEXT, null);
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        for (const node of nodes) {
+            const text = node.nodeValue || '';
+            const lower = text.toLowerCase();
+            let hasHit = false;
+            for (const f of frags) {
+                if (lower.indexOf(f) >= 0) { hasHit = true; break; }
+            }
+            if (!hasHit) continue;
+            const parent = node.parentNode;
+            if (!parent || parent.closest && parent.closest('.cs-kw')) continue;
+            const frag = document.createDocumentFragment();
+            let rest = text;
+            while (rest.length > 0) {
+                const lrest = rest.toLowerCase();
+                let bestIdx = -1;
+                let bestLen = 0;
+                for (const f of frags) {
+                    const i = lrest.indexOf(f);
+                    if (i >= 0 && (bestIdx < 0 || i < bestIdx)) { bestIdx = i; bestLen = f.length; }
+                }
+                if (bestIdx < 0) {
+                    frag.appendChild(document.createTextNode(rest));
+                    break;
+                }
+                if (bestIdx > 0) frag.appendChild(document.createTextNode(rest.slice(0, bestIdx)));
+                const mark = document.createElement('span');
+                mark.className = 'cs-kw';
+                mark.textContent = rest.slice(bestIdx, bestIdx + bestLen);
+                frag.appendChild(mark);
+                rest = rest.slice(bestIdx + bestLen);
+            }
+            parent.replaceChild(frag, node);
+        }
+    }
+
+    // 移除金色高亮（把 span 还原为纯文本，不破坏内容）
+    function clearKwHighlight() {
+        const marks = document.querySelectorAll('#chat .cs-kw');
+        marks.forEach(el => {
+            const t = document.createTextNode(el.textContent);
+            el.parentNode.replaceChild(t, el);
+        });
+    }
+
+    // 跳转后切换金色高亮：同一关键词再次点击结果 → 关闭；否则 → 开启
+    function toggleKwHighlight() {
+        const kw = lastSearchKeyword;
+        if (!kw) return;
+        if (kwHighlightOn) {
+            clearKwHighlight();
+            kwHighlightOn = false;
+        } else {
+            clearKwHighlight();
+            applyKwHighlight(kw);
+            kwHighlightOn = true;
+        }
+    }
+
     async function jumpTo(r) {
         try {
             ctx = window.SillyTavern.getContext();
@@ -546,6 +621,9 @@ import { power_user } from '../../../power-user.js';
                     }
                 }, 400);
             }
+
+            // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启
+            toggleKwHighlight();
 
             if (!ok) {
                 toastr.info('已打开该聊天，但没找到目标楼层（可能被合并/删除）', EXT_NAME);
@@ -633,7 +711,7 @@ import { power_user } from '../../../power-user.js';
         }
     }
 
-    // 渲染角色多选 UI：chips + 下拉列表
+    // 渲染角色多选 UI：折叠按钮 + 下拉列表（全量角色，同名合并，点击一起筛）
     function renderCharFilterUI() {
         ctx = window.SillyTavern.getContext();
         renderChips();
@@ -641,11 +719,8 @@ import { power_user } from '../../../power-user.js';
         if (!list) return;
         const q = document.getElementById('chat-search-char-q');
         const kw = q ? q.value.trim().toLowerCase() : '';
-        const chars = (ctx.characters || [])
-            .filter(c => c.avatar && c.avatar !== 'none' && Number(c.chat_size) > 0)
-            .filter(c => !kw || c.name.toLowerCase().includes(kw))
-            .sort((a, b) => a.name.localeCompare(b.name, 'zh'));
-        if (chars.length === 0 && (!ctx.characters || ctx.characters.length === 0)) {
+        const all = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none');
+        if (all.length === 0) {
             // 角色还在加载：显示提示并稍后自动重绘
             list.innerHTML = '<div class="cs-char-empty">角色列表加载中…</div>';
             setTimeout(() => {
@@ -653,25 +728,61 @@ import { power_user } from '../../../power-user.js';
             }, 1000);
             return;
         }
+        // 按名字分组（同名卡合并，点击一起筛）
+        const groups = new Map();
+        for (const c of all) {
+            if (!groups.has(c.name)) groups.set(c.name, []);
+            groups.get(c.name).push(c);
+        }
+        const names = [...groups.keys()]
+            .filter(n => !kw || n.toLowerCase().includes(kw))
+            .sort((a, b) => a.localeCompare(b, 'zh'));
         list.innerHTML = '';
-        if (chars.length === 0) {
+        if (names.length === 0) {
             list.innerHTML = '<div class="cs-char-empty">没有匹配的角色</div>';
             return;
         }
-        for (const c of chars) {
-            const row = document.createElement('label');
+        for (const name of names) {
+            const cards = groups.get(name);
+            const row = document.createElement('div');
             row.className = 'cs-char-row';
+            row.setAttribute('data-name', name);
             const cb = document.createElement('input');
             cb.type = 'checkbox';
-            cb.checked = selectedChars.has(c.avatar);
-            cb.addEventListener('change', () => toggleChar(c.avatar));
+            const allSelected = cards.every(c => selectedChars.has(c.avatar));
+            const someSelected = cards.some(c => selectedChars.has(c.avatar));
+            cb.checked = allSelected;
+            cb.indeterminate = someSelected && !allSelected;
             const span = document.createElement('span');
-            span.textContent = c.name;
+            span.textContent = name + (cards.length > 1 ? '（' + cards.length + ' 张卡）' : '');
             span.className = 'cs-char-name';
+            span.title = cards.length > 1 ? '该名字有 ' + cards.length + ' 张卡，点击一起筛' : '';
             row.appendChild(cb);
             row.appendChild(span);
+            // 整行可点（label 行为）
+            row.addEventListener('click', ev => {
+                if (ev.target.tagName === 'INPUT') return; // 原生 checkbox 自己处理
+                toggleCharGroup(name, cards, row, cb);
+            });
+            cb.addEventListener('change', () => toggleCharGroup(name, cards, row, cb));
             list.appendChild(row);
         }
+    }
+
+    // 按同名组切换选中（同名卡一起选中/取消）
+    function toggleCharGroup(name, cards, row, cb) {
+        const allSelected = cards.every(c => selectedChars.has(c.avatar));
+        if (allSelected) {
+            cards.forEach(c => selectedChars.delete(c.avatar));
+        } else {
+            cards.forEach(c => selectedChars.add(c.avatar));
+        }
+        saveFilters();
+        renderChips();
+        const newAll = cards.every(c => selectedChars.has(c.avatar));
+        const newSome = cards.some(c => selectedChars.has(c.avatar));
+        cb.checked = newAll;
+        cb.indeterminate = newSome && !newAll;
     }
 
     // ---------- UI 构建 ----------
@@ -731,11 +842,22 @@ import { power_user } from '../../../power-user.js';
     display:flex; align-items:center; gap:8px; flex-wrap:wrap;
     padding:8px 14px; border-bottom:1px solid var(--SmartThemeBorderColor, #444);
 }
+.cs-filter-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:6px 12px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--SmartThemeBorderColor, #555);
+    background:var(--SmartThemeBlurTintColor, #3a3a4a);
+    color:var(--SmartThemeBodyColor, #eee); font-size:13px; white-space:nowrap;
+}
+.cs-filter-btn:hover { filter:brightness(1.2); }
+.cs-filter-btn.active { border-color:#ffa657; }
+.cs-filter-btn.active .cs-char-caret { transform:rotate(180deg); }
+.cs-filter-icon { opacity:.8; }
 .cs-char-box {
-    position:relative; flex:1; min-width:200px;
+    width:calc(100% - 28px); margin:0 14px 4px; box-sizing:border-box;
     border:1px solid var(--SmartThemeBorderColor, #555);
     border-radius:8px; background:var(--SmartThemeBlurTintColor, #2a2a3a);
-    padding:4px 6px; cursor:pointer; display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    padding:4px 6px; display:flex; align-items:center; gap:4px; flex-wrap:wrap;
 }
 .cs-chips { display:flex; align-items:center; gap:4px; flex-wrap:wrap; flex:1; }
 .cs-chip {
@@ -746,10 +868,10 @@ import { power_user } from '../../../power-user.js';
 }
 .cs-chip:hover { filter:brightness(1.2); }
 .cs-chip-all { opacity:.7; cursor:default; font-style:italic; }
-.cs-char-caret { font-size:11px; opacity:.7; }
+.cs-char-caret { font-size:11px; opacity:.7; transition:transform .2s; }
 .cs-char-count { font-size:12px; opacity:.75; white-space:nowrap; }
 .cs-char-dd {
-    position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:50;
+    width:calc(100% - 28px); margin:0 14px 4px; box-sizing:border-box;
     background:var(--SmartThemeBlurTintColor, #23233a);
     border:1px solid var(--SmartThemeBorderColor, #555);
     border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.45);
@@ -869,6 +991,10 @@ import { power_user } from '../../../power-user.js';
 .cs-fav-actions button:hover { filter:brightness(1.2); }
 .chat-search-flash { outline:3px solid #ffd54d; outline-offset:2px; border-radius:6px; animation:cs-flash 2.5s ease-out; }
 @keyframes cs-flash { 0% { background:rgba(255,213,77,.4); } 100% { background:transparent; } }
+.cs-kw {
+    color:#ffd54d; background:rgba(255,213,77,.18);
+    border-radius:3px; padding:0 1px; font-weight:700;
+}
 `;
         document.head.appendChild(css);
     }
@@ -902,20 +1028,23 @@ import { power_user } from '../../../power-user.js';
     <button id="chat-search-clear" title="清空缓存重新扫描">刷新</button>
   </div>
   <div class="cs-filter-row">
-    <div id="chat-search-char-box" class="cs-char-box" title="点击选择角色（可搜索多选，不选=全部）">
-      <div class="cs-chips"></div>
+    <button id="chat-search-filter-toggle" type="button" class="cs-filter-btn" title="点击展开/收起角色筛选（同名角色默认一起筛）">
+      <span class="cs-filter-icon">⚙</span> 筛选角色
+      <span id="chat-search-char-count" class="cs-char-count"></span>
       <span class="cs-char-caret">▾</span>
-      <div id="chat-search-char-dd" class="cs-char-dd">
-        <div class="cs-char-dd-head">
-          <input id="chat-search-char-q" type="text" placeholder="搜索角色名…" />
-          <button id="chat-search-char-all" type="button">全选</button>
-          <button id="chat-search-char-none" type="button">清空</button>
-        </div>
-        <div id="chat-search-char-list" class="cs-char-list"></div>
-      </div>
-    </div>
-    <span id="chat-search-char-count" class="cs-char-count"></span>
+    </button>
     <label class="cs-exclude-user"><input type="checkbox" id="chat-search-exclude-user" /> 排除用户消息</label>
+  </div>
+  <div id="chat-search-char-dd" class="cs-char-dd">
+    <div class="cs-char-dd-head">
+      <input id="chat-search-char-q" type="text" placeholder="搜索角色名…" />
+      <button id="chat-search-char-all" type="button">全选</button>
+      <button id="chat-search-char-none" type="button">清空</button>
+    </div>
+    <div id="chat-search-char-list" class="cs-char-list"></div>
+  </div>
+  <div id="chat-search-char-box" class="cs-char-box" title="已选角色，点击标签可移除">
+    <div class="cs-chips"></div>
   </div>
   <div class="cs-meta">
     <span id="chat-search-info"></span>
@@ -956,16 +1085,18 @@ import { power_user } from '../../../power-user.js';
         // 角色多选交互
         exUser.checked = excludeUser;
         exUser.addEventListener('change', () => setExcludeUser(exUser.checked));
-        box.addEventListener('click', ev => {
-            // 点 chips 的 × 已 stopPropagation，这里只负责开关下拉
+        const filterToggle = div.querySelector('#chat-search-filter-toggle');
+        filterToggle.addEventListener('click', ev => {
+            ev.stopPropagation();
             dd.classList.toggle('open');
+            filterToggle.classList.toggle('active', dd.classList.contains('open'));
         });
         q.addEventListener('input', () => renderCharFilterUI());
         q.addEventListener('click', ev => ev.stopPropagation());
         div.querySelector('#chat-search-char-all').addEventListener('click', ev => {
             ev.stopPropagation();
             const chars = (ctx.characters || [])
-                .filter(c => c.avatar && c.avatar !== 'none' && Number(c.chat_size) > 0);
+                .filter(c => c.avatar && c.avatar !== 'none');
             selectedChars = new Set(chars.map(c => c.avatar));
             saveFilters();
             renderCharFilterUI();
