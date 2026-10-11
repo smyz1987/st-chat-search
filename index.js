@@ -900,32 +900,72 @@ import { power_user } from '../../../power-user.js';
     }
 
     function buildButton() {
-        if (document.getElementById(BTN_ID)) return;
-        // 优先放进左侧聊天列表头部；找不到则放固定位置（左上、避开右下悬浮窗）
-        const anchors = [
-            '#chat_list_header',
-            '.chat_list_header',
-            '#character_list_header',
-            '#left-nav-panel .flex-container',
-            '#left-nav-panel',
-        ];
-        let anchor = null;
-        for (const sel of anchors) {
-            const el = document.querySelector(sel);
-            if (el && el.offsetParent !== null) { anchor = el; break; }
-        }
-        const btn = document.createElement('button');
-        btn.id = BTN_ID;
-        btn.type = 'button';
-        btn.innerHTML = '🔍 搜索聊天内容';
-        btn.title = '在所有角色的聊天记录中搜索关键词，点击直达对应楼层';
-        btn.addEventListener('click', openModal);
-        if (anchor) {
-            anchor.appendChild(btn);
-        } else {
-            btn.style.cssText = 'position:fixed; top:52px; left:12px; z-index:9999;';
+        let btn = document.getElementById(BTN_ID);
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = BTN_ID;
+            btn.type = 'button';
+            btn.innerHTML = '🔍 搜索聊天内容';
+            btn.title = '在所有角色的聊天记录中搜索关键词，点击直达对应楼层';
+            btn.addEventListener('click', openModal);
             document.body.appendChild(btn);
         }
+        // 按优先级找可见锚点挂载：
+        // 1) 欢迎页标题行（首页"Recent Chats"上方，ST 1.18 的总聊天界面）
+        // 2) 聊天历史弹窗标题行（打开角色聊天历史时）
+        // 3) 旧版聊天列表头（兼容旧结构）
+        // 都不在则回退到固定定位（左上角）
+        // 弹窗打开时优先挂到聊天历史弹窗标题行，否则挂欢迎页标题行
+        // 显隐由 #shadow_select_chat_popup 父级控制，两者都看（fixed/absolute 元素 offsetParent 恒为 null，靠 display 判断）
+        const popup = document.getElementById('select_chat_popup');
+        const popupShadow = document.getElementById('shadow_select_chat_popup');
+        const popupOpen = popup && getComputedStyle(popup).display !== 'none'
+            && (!popupShadow || getComputedStyle(popupShadow).display !== 'none');
+        const anchors = popupOpen
+            ? ['#selectChatPopupHeaderText', '.welcomeHeader', '#chat_list_header', '.chat_list_header', '#character_list_header']
+            : ['.welcomeHeader', '#selectChatPopupHeaderText', '#chat_list_header', '.chat_list_header', '#character_list_header'];
+        for (const sel of anchors) {
+            const el = document.querySelector(sel);
+            // 聊天历史弹窗标题行：弹窗打开时父级 shadow 容器控制显隐，header 自身 offsetParent 可能为 null，
+            // 因此弹窗打开状态下只要元素存在就挂载
+            const visible = (sel === '#selectChatPopupHeaderText' && popupOpen)
+                ? !!el
+                : (el && el.offsetParent !== null);
+            if (visible) {
+                if (el.contains(btn)) return; // 已在该锚点
+                btn.style.cssText = '';
+                // 欢迎页：放在标题文本后面、快捷按钮前面，和"Recent Chats"同排
+                if (sel === '.welcomeHeader') {
+                    const title = el.querySelector('.recentChatsTitle');
+                    if (title) {
+                        el.insertBefore(btn, title.nextSibling);
+                    } else {
+                        el.insertBefore(btn, el.firstChild);
+                    }
+                } else {
+                    el.appendChild(btn);
+                }
+                return;
+            }
+        }
+        // 兜底：固定定位
+        btn.style.cssText = 'position:fixed; top:52px; left:12px; z-index:9999;';
+        document.body.appendChild(btn);
+    }
+
+    // 欢迎页/聊天弹窗是异步渲染的，监听 DOM 变化保持按钮挂在对的位置
+    let anchorObserver = null;
+    function watchAnchors() {
+        if (anchorObserver) return;
+        let timer = null;
+        anchorObserver = new MutationObserver(() => {
+            if (timer) return;
+            timer = setTimeout(() => {
+                timer = null;
+                buildButton();
+            }, 400);
+        });
+        anchorObserver.observe(document.body, { childList: true, subtree: true });
     }
 
     // ---------- 缓存失效 ----------
@@ -946,6 +986,7 @@ import { power_user } from '../../../power-user.js';
         loadFavorites();
         buildStyle();
         buildButton();
+        watchAnchors();
         const ET = ctx.eventTypes;
         try {
             ctx.eventSource.on(ET.MESSAGE_SENT, invalidateCurrent);
