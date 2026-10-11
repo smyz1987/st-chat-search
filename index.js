@@ -1350,6 +1350,15 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
             btn.addEventListener('click', openModal);
             document.body.appendChild(btn);
         }
+        // 聊天界面激活（进入单个角色聊天页）时：按钮隐藏，不占空间
+        // （即使欢迎页容器部分可见也强制隐藏）
+        const chatEl = document.getElementById('chat');
+        const chatOpen = chatEl && getComputedStyle(chatEl).display !== 'none';
+        if (chatOpen) {
+            btn.style.cssText = '';
+            btn.style.display = 'none';
+            return;
+        }
         // 聊天历史弹窗打开时：按钮隐藏（不占空间，回到首页/关弹窗自动恢复）
         // ST 1.18 的 #select_chat_popup 恒 display:flex（不是开关），
         // 实际显隐由父容器 #shadow_select_chat_popup 控制（display:none=关闭）
@@ -1473,4 +1482,10 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
     } else {
         init();
     }
+
+    // 顶层启动按钮显隐轮询（不依赖 init 是否完整执行，双保险）：
+    // 某些情况下 init 中途中断会导致轮询未启动，这里延迟启动兜底
+    setTimeout(function () {
+        try { startVisibilityWatch(); } catch (e) { /* 忽略 */ }
+    }, 300);
 })();
