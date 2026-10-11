@@ -727,11 +727,17 @@ import { power_user } from '../../../power-user.js';
                     }
                 }
             }
-            try {
-                const op = await withTimeout(ctx.openCharacterChat(r.chatFile), 8000, '打开聊天');
-                if (op === '__TIMEOUT__') console.warn('[chat-search] 打开聊天超时（继续尝试）');
-            } catch (e) {
-                console.warn('[chat-search] 打开聊天异常（继续尝试）', e);
+            // 目标聊天是否当前已打开（同一角色 + 同一聊天文件）→ 跳过重加载，直接定位（秒跳，参考单角色搜索体验）
+            const selChatEl = document.getElementById('selected_chat_pole');
+            const curChatFile = selChatEl ? selChatEl.value : null;
+            const sameChat = String(ctx.characterId) === String(idx) && curChatFile === r.chatFile;
+            if (!sameChat) {
+                try {
+                    const op = await withTimeout(ctx.openCharacterChat(r.chatFile), 8000, '打开聊天');
+                    if (op === '__TIMEOUT__') console.warn('[chat-search] 打开聊天超时（继续尝试）');
+                } catch (e) {
+                    console.warn('[chat-search] 打开聊天异常（继续尝试）', e);
+                }
             }
 
             // 快速定位：目标楼周围 ±10 条内足够（不等全量渲染，大幅提速）。
