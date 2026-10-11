@@ -744,7 +744,7 @@ import { power_user } from '../../../power-user.js';
             while (Date.now() - jt0 < 10000) {
                 actualMesid = findMesidCandidates(r.msgIndex);
                 if (actualMesid >= 0) { el = document.querySelector('.mes[mesid="' + actualMesid + '"]'); break; }
-                if (!fastRendered && Date.now() - jt0 > 1500 && typeof redisplayChat === 'function') {
+                if (!fastRendered && Date.now() - jt0 > 800 && typeof redisplayChat === 'function') {
                     fastRendered = true;
                     const savedTruncation = (typeof power_user !== 'undefined') ? power_user.chat_truncation : 0;
                     (async () => {
@@ -770,8 +770,8 @@ import { power_user } from '../../../power-user.js';
             }
 
             if (el) {
-                // 等消息内容渲染（短等待：多数消息 <1.5s 完成；大消息未完成则先定位、后台再微调）
-                const rendered = await waitMesText(el, 1500);
+                // 等消息内容渲染（短等待：多数消息 <0.8s 完成；未完成则先定位、后台再微调）
+                const rendered = await waitMesText(el, 800);
                 const textLen = (el.textContent || '').length;
                 const blockMode = textLen > 4000 ? 'start' : 'center';
                 el.scrollIntoView({ behavior: 'auto', block: blockMode });
