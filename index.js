@@ -645,7 +645,21 @@ import { power_user } from '../../../power-user.js';
         }, 800);
     }
 
+    // 带超时的异步：超时返回 '__TIMEOUT__'（不抛错、不中断流程）
+    function withTimeout(p, ms, label) {
+        return Promise.race([
+            Promise.resolve(p),
+            new Promise(res => setTimeout(() => res('__TIMEOUT__'), ms)),
+        ]);
+    }
+
+    let jumping = false; // 防止重复跳转叠加导致 ST 渲染冲突
     async function jumpTo(r) {
+        if (jumping) {
+            toastr.info('正在跳转中，请稍候', EXT_NAME);
+            return;
+        }
+        jumping = true;
         try {
             ctx = window.SillyTavern.getContext();
             let idx = (ctx.characters || []).findIndex(c => c.avatar === r.avatar);
@@ -665,9 +679,11 @@ import { power_user } from '../../../power-user.js';
             }
             const needSwitch = String(ctx.characterId) !== String(idx);
             if (needSwitch) {
-                await ctx.selectCharacterById(idx);
+                const sw = await withTimeout(ctx.selectCharacterById(idx), 8000, '切换角色');
+                if (sw === '__TIMEOUT__') console.warn('[chat-search] 切换角色超时（继续尝试）');
             }
-            await ctx.openCharacterChat(r.chatFile);
+            const op = await withTimeout(ctx.openCharacterChat(r.chatFile), 8000, '打开聊天');
+            if (op === '__TIMEOUT__') console.warn('[chat-search] 打开聊天超时（继续尝试）');
 
             // 等聊天数据渲染出来再重定位，避免过早渲染空列表
             await waitForChatReady(10000);
@@ -680,7 +696,8 @@ import { power_user } from '../../../power-user.js';
                     power_user.chat_truncation = 0;
                     clearRendered();
                     const startIndex = Math.max(0, r.msgIndex - 5);
-                    await redisplayChat({ startIndex: startIndex, fade: false });
+                    const rr = await withTimeout(redisplayChat({ startIndex: startIndex, fade: false }), 12000, '渲染聊天');
+                    if (rr === '__TIMEOUT__') console.warn('[chat-search] 渲染聊天超时（继续尝试定位）');
                 }
             } catch (e) {
                 console.warn('[chat-search] 渲染失败，尝试直接定位', e);
@@ -716,8 +733,10 @@ import { power_user } from '../../../power-user.js';
             }
             closeModal();
         } catch (e) {
-            console.error('[chat-search] 跳转失败', e);
-            toastr.error('跳转失败：' + (e.message || e), EXT_NAME);
+            console.error('[chat-search] 跳转失败', e, e && e.stack);
+            toastr.error('跳转失败：' + (e && e.message ? e.message : String(e)), EXT_NAME);
+        } finally {
+            jumping = false;
         }
     }
 
