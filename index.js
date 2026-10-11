@@ -982,6 +982,9 @@ import { power_user } from '../../../power-user.js';
     color:var(--SmartThemeBodyColor, #ddd); font-size:13px; line-height:1.4;
 }
 #${BTN_ID}:hover { filter:brightness(1.25); }
+/* 聊天历史弹窗打开（ST 用内联 display:flex 打开）时隐藏搜索按钮，不占空间（CSS 兜底，确定性生效） */
+body:has(#select_chat_popup[style*="display: flex"]) #${BTN_ID},
+body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !important; }
 #${ROOT_ID} {
     position:fixed; top:0; left:0; right:0; bottom:0; z-index:99999;
     display:none; align-items:flex-start; justify-content:center; padding:6vh 12px 12px;
