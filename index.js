@@ -666,7 +666,8 @@ import { power_user } from '../../../power-user.js';
             if (idx < 0 && typeof getCharacters === 'function') {
                 // ST 上下文里没有该角色（页面加载后新增的角色卡）：刷新 ST 角色列表再找
                 try {
-                    await getCharacters();
+                    const gc = await withTimeout(getCharacters(), 8000, '刷新角色列表');
+                    if (gc === '__TIMEOUT__') console.warn('[chat-search] 刷新角色列表超时');
                     ctx = window.SillyTavern.getContext();
                     idx = (ctx.characters || []).findIndex(c => c.avatar === r.avatar);
                 } catch (e) {
@@ -679,11 +680,19 @@ import { power_user } from '../../../power-user.js';
             }
             const needSwitch = String(ctx.characterId) !== String(idx);
             if (needSwitch) {
-                const sw = await withTimeout(ctx.selectCharacterById(idx), 8000, '切换角色');
-                if (sw === '__TIMEOUT__') console.warn('[chat-search] 切换角色超时（继续尝试）');
+                try {
+                    const sw = await withTimeout(ctx.selectCharacterById(idx), 8000, '切换角色');
+                    if (sw === '__TIMEOUT__') console.warn('[chat-search] 切换角色超时（继续尝试）');
+                } catch (e) {
+                    console.warn('[chat-search] 切换角色异常（继续尝试）', e);
+                }
             }
-            const op = await withTimeout(ctx.openCharacterChat(r.chatFile), 8000, '打开聊天');
-            if (op === '__TIMEOUT__') console.warn('[chat-search] 打开聊天超时（继续尝试）');
+            try {
+                const op = await withTimeout(ctx.openCharacterChat(r.chatFile), 8000, '打开聊天');
+                if (op === '__TIMEOUT__') console.warn('[chat-search] 打开聊天超时（继续尝试）');
+            } catch (e) {
+                console.warn('[chat-search] 打开聊天异常（继续尝试）', e);
+            }
 
             // 等聊天数据渲染出来再重定位，避免过早渲染空列表
             await waitForChatReady(10000);
@@ -735,6 +744,9 @@ import { power_user } from '../../../power-user.js';
         } catch (e) {
             console.error('[chat-search] 跳转失败', e, e && e.stack);
             toastr.error('跳转失败：' + (e && e.message ? e.message : String(e)), EXT_NAME);
+            // 失败也恢复搜索结果并关弹窗，避免界面卡死
+            renderGroupPage();
+            closeModal();
         } finally {
             jumping = false;
         }
