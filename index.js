@@ -1350,17 +1350,15 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
             btn.addEventListener('click', openModal);
             document.body.appendChild(btn);
         }
-        // 临时调试日志（验证后移除）
-        const dbgPopup = document.getElementById('select_chat_popup');
-        console.log('[cs-dbg] buildButton ran. popup=', dbgPopup ? 'EXISTS' : 'NULL', dbgPopup ? 'display=' + getComputedStyle(dbgPopup).display : '', 'btnDisplay=' + btn.style.display);
         // 聊天历史弹窗打开时：按钮隐藏（不占空间，回到首页/关弹窗自动恢复）
-        // 注：ST 1.18 的 #shadow_select_chat_popup 常态 display:none（不是显隐开关），
-        // 只依据 #select_chat_popup 自身的 display 判断弹窗是否打开
-        const popup = document.getElementById('select_chat_popup');
-        const popupOpen = popup && getComputedStyle(popup).display !== 'none';
+        // ST 1.18 的 #select_chat_popup 恒 display:flex（不是开关），
+        // 实际显隐由父容器 #shadow_select_chat_popup 控制（display:none=关闭）
+        const shadow = document.getElementById('shadow_select_chat_popup');
+        const popupOpen = shadow && getComputedStyle(shadow).display !== 'none';
         if (popupOpen) {
-            btn.style.display = 'none';
+            // 注意顺序：先清 cssText 再设 display（否则 display 会被 cssText='' 清掉）
             btn.style.cssText = '';
+            btn.style.display = 'none';
             return;
         }
         // 按钮只在首页（总聊天列表 / 欢迎页"Recent Chats"）显示；
@@ -1388,8 +1386,9 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
             }
         }
         // 不在首页（进入角色聊天/弹窗/加载中）→ 隐藏，不占空间
-        btn.style.display = 'none';
+        // 注意顺序：先清 cssText 再设 display（否则 display 会被 cssText='' 清掉）
         btn.style.cssText = '';
+        btn.style.display = 'none';
     }
 
     // 欢迎页/聊天弹窗是异步渲染的，监听 DOM 变化保持按钮挂在对的位置
@@ -1418,7 +1417,6 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
     let visTimer = null;
     function startVisibilityWatch() {
         if (visTimer) return;
-        console.log('[cs-dbg] startVisibilityWatch started');
         visTimer = setInterval(() => {
             try { buildButton(); } catch (e) { /* 忽略 */ }
         }, 800);
