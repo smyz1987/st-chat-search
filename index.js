@@ -29,8 +29,10 @@ import { power_user } from '../../../power-user.js';
     let searching = false;
     // 筛选状态：选中的角色(avatar集合，空=全部) + 是否排除用户消息
     const FILTER_KEY = 'chat-search-filters';
+    const FAV_KEY = 'chat-search-favorites';
     let selectedChars = new Set();
     let excludeUser = false;
+    let favorites = [];   // [{avatar, charName, chatFile, msgIndex, snippet, favTime}]
 
     // ---------- 工具 ----------
     function loadJson(key, def) {
@@ -47,6 +49,60 @@ import { power_user } from '../../../power-user.js';
                 excludeUser: !!excludeUser,
             }));
         } catch { /* 忽略 */ }
+    }
+
+    // ---------- 收藏 ----------
+    function loadFavorites() {
+        try {
+            const v = loadJson(FAV_KEY, []);
+            favorites = Array.isArray(v) ? v : [];
+        } catch { favorites = []; }
+    }
+
+    function saveFavorites() {
+        try { localStorage.setItem(FAV_KEY, JSON.stringify(favorites)); } catch { /* 忽略 */ }
+    }
+
+    function favKeyOf(r) {
+        return r.avatar + '::' + r.chatFile + '::' + r.msgIndex;
+    }
+
+    function isFavorite(r) {
+        const k = favKeyOf(r);
+        return favorites.some(f => favKeyOf(f) === k);
+    }
+
+    function toggleFavorite(r) {
+        const k = favKeyOf(r);
+        const i = favorites.findIndex(f => favKeyOf(f) === k);
+        if (i >= 0) {
+            favorites.splice(i, 1);
+        } else {
+            favorites.unshift({
+                avatar: r.avatar,
+                charName: r.charName,
+                chatFile: r.chatFile,
+                msgIndex: r.msgIndex,
+                snippet: r.snippet || '',
+                favTime: Date.now(),
+            });
+        }
+        saveFavorites();
+        updateFavCount();
+    }
+
+    function updateFavCount() {
+        const el = document.getElementById('chat-search-fav-count');
+        if (el) el.textContent = favorites.length;
+    }
+
+    function removeFavorite(idx) {
+        if (idx >= 0 && idx < favorites.length) {
+            favorites.splice(idx, 1);
+            saveFavorites();
+            updateFavCount();
+            renderFavList();
+        }
     }
 
     function escHtml(s) {
@@ -245,6 +301,7 @@ import { power_user } from '../../../power-user.js';
         const html = results.map((r, idx) => {
             const who = r.isUser ? '用户' : '角色';
             const swipeTag = r.swipeCount > 1 ? '<span class="cs-swipe">命中第 ' + (r.swipeId + 1) + '/' + r.swipeCount + ' 条候选</span>' : '';
+            const faved = isFavorite(r);
             return '<div class="cs-item" data-idx="' + idx + '">' +
                 '<div class="cs-item-head">' +
                 '<span class="cs-char">' + escHtml(r.charName) + '</span>' +
@@ -252,6 +309,7 @@ import { power_user } from '../../../power-user.js';
                 '<span class="cs-floor">第 ' + (r.msgIndex + 1) + ' 楼</span>' +
                 '<span class="cs-who">' + who + '</span>' +
                 swipeTag +
+                '<span class="cs-fav-btn' + (faved ? ' faved' : '') + '" title="收藏此楼，之后可在「收藏」里直接跳转">' + (faved ? '★' : '☆') + '</span>' +
                 '</div>' +
                 '<div class="cs-snippet">' + escHtml(r.snippet) + '</div>' +
                 '</div>';
@@ -265,6 +323,71 @@ import { power_user } from '../../../power-user.js';
                 if (r) jumpTo(r);
             });
         });
+        // 绑定收藏按钮（阻止冒泡，不触发跳转）
+        listEl.querySelectorAll('.cs-fav-btn').forEach(el => {
+            el.addEventListener('click', ev => {
+                ev.stopPropagation();
+                const idx = Number(el.closest('.cs-item').getAttribute('data-idx'));
+                const r = results[idx];
+                if (r) {
+                    toggleFavorite(r);
+                    const faved = isFavorite(r);
+                    el.textContent = faved ? '★' : '☆';
+                    el.classList.toggle('faved', faved);
+                }
+            });
+        });
+    }
+
+    // ---------- 收藏列表 ----------
+    function renderFavList() {
+        const view = document.getElementById('chat-search-fav-view');
+        if (!view) return;
+        if (favorites.length === 0) {
+            view.innerHTML = '<div class="cs-empty">还没有收藏。在搜索结果里点 ☆ 即可收藏该楼层，之后在这里一键直达。</div>';
+            return;
+        }
+        view.innerHTML = favorites.map((f, idx) => {
+            const when = new Date(f.favTime);
+            const whenStr = (when.getMonth() + 1) + '/' + when.getDate() + ' ' +
+                String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
+            return '<div class="cs-fav-item" data-fidx="' + idx + '">' +
+                '<div class="cs-item-head">' +
+                '<span class="cs-fav-del" title="取消收藏">×</span>' +
+                '<span class="cs-char">' + escHtml(f.charName) + '</span>' +
+                '<span class="cs-date">' + escHtml(humanTime(f.chatFile)) + '</span>' +
+                '<span class="cs-floor">第 ' + (f.msgIndex + 1) + ' 楼</span>' +
+                '<span class="cs-fav-time">' + whenStr + ' 收藏</span>' +
+                '</div>' +
+                '<div class="cs-snippet">' + escHtml(f.snippet) + '</div>' +
+                '</div>';
+        }).join('') +
+            '<div class="cs-fav-actions"><button id="chat-search-fav-clear" type="button">清空收藏</button></div>';
+        // 点条目直达
+        view.querySelectorAll('.cs-fav-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const f = favorites[Number(el.getAttribute('data-fidx'))];
+                if (f) jumpTo(f);
+            });
+        });
+        // 删除单条
+        view.querySelectorAll('.cs-fav-del').forEach(el => {
+            el.addEventListener('click', ev => {
+                ev.stopPropagation();
+                const idx = Number(el.closest('.cs-fav-item').getAttribute('data-fidx'));
+                removeFavorite(idx);
+            });
+        });
+        // 清空全部
+        const clearBtn = view.querySelector('#chat-search-fav-clear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                favorites = [];
+                saveFavorites();
+                updateFavCount();
+                renderFavList();
+            });
+        }
     }
 
     // ---------- 跳转 ----------
@@ -602,6 +725,33 @@ import { power_user } from '../../../power-user.js';
     word-break:break-all;
 }
 .cs-empty { padding:24px; text-align:center; opacity:.6; }
+.cs-tabs { display:flex; gap:6px; padding:0 14px 8px; flex-wrap:wrap; }
+.cs-tab {
+    background:var(--SmartThemeBlurTintColor, rgba(128,128,128,.15));
+    border:1px solid var(--SmartThemeBorderColor, #666); border-radius:8px;
+    color:var(--SmartThemeBodyColor, #ddd); font-size:13px; padding:5px 12px; cursor:pointer;
+}
+.cs-tab.active { background:var(--SmartThemeBlurTintColor, rgba(255,166,87,.35)); border-color:#ffa657; color:#ffd54d; font-weight:700; }
+.cs-fav-num { font-weight:700; }
+.cs-fav-btn { cursor:pointer; font-size:15px; margin-left:auto; opacity:.85; user-select:none; }
+.cs-fav-btn:hover { opacity:1; transform:scale(1.15); }
+.cs-fav-btn.faved { color:#ffd54d; opacity:1; }
+.cs-fav-view { overflow-y:auto; padding:4px 10px 12px; }
+.cs-fav-item {
+    padding:7px 10px; margin:4px 0; cursor:pointer;
+    border:1px solid transparent; border-radius:8px;
+}
+.cs-fav-item:hover { background:var(--SmartThemeBlurTintColor, rgba(255,255,255,.07)); border-color:var(--SmartThemeBorderColor,#555); }
+.cs-fav-del { cursor:pointer; color:#f87171; font-weight:700; font-size:14px; margin-right:2px; }
+.cs-fav-del:hover { transform:scale(1.2); }
+.cs-fav-time { opacity:.55; }
+.cs-fav-actions { padding:10px; text-align:center; }
+.cs-fav-actions button {
+    background:var(--SmartThemeBlurTintColor, rgba(128,128,128,.15));
+    border:1px solid var(--SmartThemeBorderColor, #666); border-radius:8px;
+    color:var(--SmartThemeBodyColor, #ddd); font-size:13px; padding:5px 14px; cursor:pointer;
+}
+.cs-fav-actions button:hover { filter:brightness(1.2); }
 .chat-search-flash { outline:3px solid #ffd54d; outline-offset:2px; border-radius:6px; animation:cs-flash 2.5s ease-out; }
 @keyframes cs-flash { 0% { background:rgba(255,213,77,.4); } 100% { background:transparent; } }
 `;
@@ -623,9 +773,14 @@ import { power_user } from '../../../power-user.js';
         div.innerHTML = `
 <div class="cs-panel">
   <div class="cs-panel-head">
-    <span class="cs-title">🔍 聊天全文搜索</span>
+    <span class="cs-title">聊天全文搜索</span>
     <button id="chat-search-close" title="关闭">×</button>
   </div>
+  <div class="cs-tabs">
+    <button id="chat-search-tab-search" class="cs-tab active" type="button">🔍 搜索</button>
+    <button id="chat-search-tab-fav" class="cs-tab" type="button">⭐ 收藏 <span id="chat-search-fav-count" class="cs-fav-num"></span></button>
+  </div>
+  <div id="chat-search-search-view">
   <div class="cs-search-row">
     <input id="chat-search-input" type="text" placeholder="输入关键词，多个词用空格分隔（AND）…" />
     <button id="chat-search-go">搜索</button>
@@ -652,6 +807,8 @@ import { power_user } from '../../../power-user.js';
     <span id="chat-search-progress"></span>
   </div>
   <div id="chat-search-results" class="cs-list"></div>
+  </div>
+  <div id="chat-search-fav-view" class="cs-fav-view" style="display:none"></div>
 </div>`;
         document.body.appendChild(div);
 
@@ -663,6 +820,23 @@ import { power_user } from '../../../power-user.js';
         const dd = div.querySelector('#chat-search-char-dd');
         const q = div.querySelector('#chat-search-char-q');
         const exUser = div.querySelector('#chat-search-exclude-user');
+
+        // 搜索 / 收藏 tab
+        const tabSearch = div.querySelector('#chat-search-tab-search');
+        const tabFav = div.querySelector('#chat-search-tab-fav');
+        const searchView = div.querySelector('#chat-search-search-view');
+        const favView = div.querySelector('#chat-search-fav-view');
+        function switchTab(which) {
+            const isFav = which === 'fav';
+            tabSearch.classList.toggle('active', !isFav);
+            tabFav.classList.toggle('active', isFav);
+            searchView.style.display = isFav ? 'none' : '';
+            favView.style.display = isFav ? '' : 'none';
+            if (isFav) renderFavList();
+        }
+        tabSearch.addEventListener('click', () => switchTab('search'));
+        tabFav.addEventListener('click', () => switchTab('fav'));
+        updateFavCount();
 
         // 角色多选交互
         exUser.checked = excludeUser;
@@ -769,6 +943,7 @@ import { power_user } from '../../../power-user.js';
     // ---------- 初始化 ----------
     function init() {
         ctx = window.SillyTavern.getContext();
+        loadFavorites();
         buildStyle();
         buildButton();
         const ET = ctx.eventTypes;
