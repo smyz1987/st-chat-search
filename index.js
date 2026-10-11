@@ -379,7 +379,7 @@ import { power_user } from '../../../power-user.js';
         return '<div class="cs-item" data-idx="' + r.__gidx + '">' +
             '<div class="cs-item-head">' +
             '<span class="cs-date">' + escHtml(r.chatDate) + '</span>' +
-            '<span class="cs-floor">第 ' + (r.msgIndex + 1) + ' 楼</span>' +
+            '<span class="cs-floor">第 ' + (r.msgIndex) + ' 楼</span>' +
             '<span class="cs-who">' + who + '</span>' +
             swipeTag +
             '<span class="cs-fav-btn' + (faved ? ' faved' : '') + '" title="收藏此楼，之后可在「收藏」里直接跳转">' + (faved ? '★' : '☆') + '</span>' +
@@ -489,7 +489,7 @@ import { power_user } from '../../../power-user.js';
                 '<span class="cs-fav-del" title="取消收藏">×</span>' +
                 '<span class="cs-char">' + escHtml(f.charName) + '</span>' +
                 '<span class="cs-date">' + escHtml(humanTime(f.chatFile)) + '</span>' +
-                '<span class="cs-floor">第 ' + (f.msgIndex + 1) + ' 楼</span>' +
+                '<span class="cs-floor">第 ' + (f.msgIndex) + ' 楼</span>' +
                 '<span class="cs-fav-time">' + whenStr + ' 收藏</span>' +
                 '</div>' +
                 '<div class="cs-snippet">' + escHtml(f.snippet) + '</div>' +
@@ -768,7 +768,7 @@ import { power_user } from '../../../power-user.js';
                 }
                 // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启（仅跳转成功时）
                 toggleKwHighlight();
-                toastr.success('已跳转到「' + r.charName + '」第 ' + (actualMesid + 1) + ' 楼', EXT_NAME);
+                toastr.success('已跳转到「' + r.charName + '」第 ' + (actualMesid) + ' 楼', EXT_NAME);
             } else {
                 toastr.info('已打开该聊天，但没找到目标楼层（可能被合并/删除）', EXT_NAME);
             }
