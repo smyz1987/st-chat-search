@@ -991,12 +991,15 @@ import { power_user } from '../../../power-user.js';
 }
 #${ROOT_ID}.open { display:flex; }
 #${ROOT_ID} .cs-panel {
-    width:min(680px, 96vw); max-height:82vh;
+    width:min(680px, 96vw); max-height:82vh; overflow:hidden;
     display:flex; flex-direction:column;
     background:var(--SmartThemeBlurTintColor, #1e1e2e);
     border:1px solid var(--SmartThemeBorderColor, #555);
     border-radius:12px; box-shadow:0 8px 40px rgba(0,0,0,.5);
     color:var(--SmartThemeBodyColor, #eee);
+}
+#chat-search-search-view {
+    display:flex; flex-direction:column; flex:1; min-height:0;
 }
 .cs-panel-head {
     display:flex; align-items:center; gap:8px;
@@ -1094,7 +1097,7 @@ import { power_user } from '../../../power-user.js';
 .cs-exclude-user:hover { filter:brightness(1.15); }
 .cs-meta { display:flex; justify-content:space-between; padding:4px 14px; font-size:12px; opacity:.8; }
 #${ROOT_ID} .cs-list {
-    overflow-y:auto; padding:4px 10px 12px;
+    flex:1; min-height:0; overflow-y:auto; padding:4px 10px 12px;
 }
 .cs-item {
     padding:8px 10px; margin:4px 0; cursor:pointer;
@@ -1158,7 +1161,7 @@ import { power_user } from '../../../power-user.js';
 .cs-fav-btn { cursor:pointer; font-size:15px; margin-left:auto; opacity:.85; user-select:none; }
 .cs-fav-btn:hover { opacity:1; transform:scale(1.15); }
 .cs-fav-btn.faved { color:#ffd54d; opacity:1; }
-.cs-fav-view { overflow-y:auto; padding:4px 10px 12px; }
+.cs-fav-view { flex:1; min-height:0; overflow-y:auto; padding:4px 10px 12px; }
 .cs-fav-item {
     padding:7px 10px; margin:4px 0; cursor:pointer;
     border:1px solid transparent; border-radius:8px;
