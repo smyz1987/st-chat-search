@@ -272,12 +272,12 @@ import { power_user } from '../../../power-user.js';
             ctx = window.SillyTavern.getContext();
             allChars = currentChars().filter(c => c.avatar && c.avatar !== 'none');
         }
-        // 角色筛选：选中了角色就只搜这些角色（同名卡一起选中的都在集合里，含无聊天卡也快速跳过），
-        // 否则只扫有聊天记录的角色，跳过无聊天角色省时间
+        // 角色筛选：选中了角色就只搜这些角色（同名卡一起选中的都在集合里）；
+        // 未选角色则扫描全部角色（无聊天记录的角色 API 快速返回空，不遗漏新增角色卡）
         const selected = getSelectedChars();
         const targets = selected.size > 0
             ? allChars.filter(c => selected.has(c.avatar))
-            : allChars.filter(c => Number(c.chat_size) > 0);
+            : allChars;
         const results = [];
         let scanned = 0;
         setProgress('正在扫描 0/' + targets.length + ' 个角色…');
