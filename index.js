@@ -1349,30 +1349,16 @@ import { power_user } from '../../../power-user.js';
             btn.addEventListener('click', openModal);
             document.body.appendChild(btn);
         }
-        // 按优先级找可见锚点挂载：
-        // 1) 欢迎页标题行（首页"Recent Chats"上方，ST 1.18 的总聊天界面）
-        // 2) 聊天历史弹窗标题行（打开角色聊天历史时）
-        // 3) 旧版聊天列表头（兼容旧结构）
-        // 都不在则回退到固定定位（左上角）
-        // 弹窗打开时优先挂到聊天历史弹窗标题行，否则挂欢迎页标题行
-        // 显隐由 #shadow_select_chat_popup 父级控制，两者都看（fixed/absolute 元素 offsetParent 恒为 null，靠 display 判断）
-        const popup = document.getElementById('select_chat_popup');
-        const popupShadow = document.getElementById('shadow_select_chat_popup');
-        const popupOpen = popup && getComputedStyle(popup).display !== 'none'
-            && (!popupShadow || getComputedStyle(popupShadow).display !== 'none');
-        const anchors = popupOpen
-            ? ['#selectChatPopupHeaderText', '.welcomeHeader', '#chat_list_header', '.chat_list_header', '#character_list_header']
-            : ['.welcomeHeader', '#selectChatPopupHeaderText', '#chat_list_header', '.chat_list_header', '#character_list_header'];
+        // 按钮只在首页（总聊天列表 / 欢迎页"Recent Chats"）显示；
+        // 进入角色聊天或打开聊天历史弹窗后不挂载、直接隐藏，不占空间。
+        // 显隐由欢迎页容器控制（offsetParent 判断可见性），回到首页自动恢复。
+        const anchors = ['.welcomeHeader', '#chat_list_header', '.chat_list_header', '#character_list_header'];
         for (const sel of anchors) {
             const el = document.querySelector(sel);
-            // 聊天历史弹窗标题行：弹窗打开时父级 shadow 容器控制显隐，header 自身 offsetParent 可能为 null，
-            // 因此弹窗打开状态下只要元素存在就挂载
-            const visible = (sel === '#selectChatPopupHeaderText' && popupOpen)
-                ? !!el
-                : (el && el.offsetParent !== null);
-            if (visible) {
+            if (el && el.offsetParent !== null) {
                 if (el.contains(btn)) return; // 已在该锚点
                 btn.style.cssText = '';
+                btn.style.display = '';
                 // 欢迎页：放在标题文本后面、快捷按钮前面，和"Recent Chats"同排
                 if (sel === '.welcomeHeader') {
                     const title = el.querySelector('.recentChatsTitle');
@@ -1387,9 +1373,9 @@ import { power_user } from '../../../power-user.js';
                 return;
             }
         }
-        // 兜底：固定定位
-        btn.style.cssText = 'position:fixed; top:52px; left:12px; z-index:9999;';
-        document.body.appendChild(btn);
+        // 不在首页（进入角色聊天/弹窗/加载中）→ 隐藏，不占空间
+        btn.style.display = 'none';
+        btn.style.cssText = '';
     }
 
     // 欢迎页/聊天弹窗是异步渲染的，监听 DOM 变化保持按钮挂在对的位置
