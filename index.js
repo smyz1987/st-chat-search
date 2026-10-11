@@ -690,6 +690,9 @@ import { power_user } from '../../../power-user.js';
                 toastr.warning('找不到该角色', EXT_NAME);
                 return;
             }
+            // 点击即反馈：用户知道跳转在进行（ST 渲染聊天需要数秒，避免以为卡死）
+            toastr.info('正在跳转到「' + r.charName + '」第 ' + r.msgIndex + ' 楼…', EXT_NAME, { timeOut: 4000 });
+
             const needSwitch = String(ctx.characterId) !== String(idx);
             if (needSwitch) {
                 try {
@@ -731,23 +734,23 @@ import { power_user } from '../../../power-user.js';
                         }
                     })();
                 }
-                await new Promise(res => setTimeout(res, 150));
+                await new Promise(res => setTimeout(res, 100));
             }
 
             if (el) {
-                // 等消息内容渲染（短等待：多数消息 <1s 完成；大消息最多 2.5s，未完成则先定位、后台再微调）
-                const rendered = await waitMesText(el, 2500);
+                // 等消息内容渲染（短等待：多数消息 <1.5s 完成；大消息未完成则先定位、后台再微调）
+                const rendered = await waitMesText(el, 1500);
                 const textLen = (el.textContent || '').length;
                 const blockMode = textLen > 4000 ? 'start' : 'center';
                 el.scrollIntoView({ behavior: 'auto', block: blockMode });
                 el.classList.add('chat-search-flash');
                 setTimeout(() => el.classList.remove('chat-search-flash'), 3000);
                 // 滚动保底：持续纠正 ST 渲染流程导致的回顶（后台，不阻塞）
-                startScrollGuard(actualMesid, 5000, blockMode);
+                startScrollGuard(actualMesid, 4000, blockMode);
                 if (!rendered) {
                     // 内容仍在渲染：后台等它完成后再微调一次定位（防"卡成代码"）
                     (async () => {
-                        await waitMesText(el, 6000);
+                        await waitMesText(el, 8000);
                         const el2 = document.querySelector('.mes[mesid="' + actualMesid + '"]');
                         if (el2) {
                             const len2 = (el2.textContent || '').length;
