@@ -1350,6 +1350,9 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
             btn.addEventListener('click', openModal);
             document.body.appendChild(btn);
         }
+        // 临时调试日志（验证后移除）
+        const dbgPopup = document.getElementById('select_chat_popup');
+        console.log('[cs-dbg] buildButton ran. popup=', dbgPopup ? 'EXISTS' : 'NULL', dbgPopup ? 'display=' + getComputedStyle(dbgPopup).display : '', 'btnDisplay=' + btn.style.display);
         // 聊天历史弹窗打开时：按钮隐藏（不占空间，回到首页/关弹窗自动恢复）
         // 注：ST 1.18 的 #shadow_select_chat_popup 常态 display:none（不是显隐开关），
         // 只依据 #select_chat_popup 自身的 display 判断弹窗是否打开
@@ -1415,6 +1418,7 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
     let visTimer = null;
     function startVisibilityWatch() {
         if (visTimer) return;
+        console.log('[cs-dbg] startVisibilityWatch started');
         visTimer = setInterval(() => {
             try { buildButton(); } catch (e) { /* 忽略 */ }
         }, 800);
