@@ -272,6 +272,10 @@ import { power_user } from '../../../power-user.js';
         for (let w = 0; w < 24 && allChars.length === 0; w++) {
             await new Promise(res => setTimeout(res, 500));
             ctx = window.SillyTavern.getContext();
+            // 兜底触发在线加载（刷新页面后首次搜索，保证拿到全量角色而不是空结果）
+            if (!liveChars || liveChars.length === 0) {
+                await loadLiveChars(false);
+            }
             allChars = currentChars().filter(c => c.avatar && c.avatar !== 'none');
         }
         // 角色筛选：选中了角色就只搜这些角色（同名卡一起选中的都在集合里）；
@@ -701,6 +705,16 @@ import { power_user } from '../../../power-user.js';
                 } catch (e) {
                     console.warn('[chat-search] 切换角色异常（继续尝试）', e);
                 }
+                // 验证切换成功：角色 ID 未更新则重试一次（ST 状态偶发污染时能自动恢复，避免卡死）
+                const cidNow = String((window.SillyTavern.getContext() || {}).characterId);
+                if (String(cidNow) !== String(idx)) {
+                    try {
+                        const sw2 = await withTimeout(ctx.selectCharacterById(idx), 8000, '重试切换角色');
+                        if (sw2 === '__TIMEOUT__') console.warn('[chat-search] 重试切换角色超时');
+                    } catch (e) {
+                        console.warn('[chat-search] 重试切换角色异常', e);
+                    }
+                }
             }
             try {
                 const op = await withTimeout(ctx.openCharacterChat(r.chatFile), 8000, '打开聊天');
@@ -709,25 +723,32 @@ import { power_user } from '../../../power-user.js';
                 console.warn('[chat-search] 打开聊天异常（继续尝试）', e);
             }
 
-            // 快速定位：轮询目标楼出现即跳（不等全量聊天渲染，大聊天也秒跳）；
-            // 目标楼在截断区时异步触发一次补渲染，不阻塞轮询
+            // 快速定位：目标楼周围 ±10 条内足够（不等全量渲染，大幅提速）。
+            // 1) 先轮询 ST 原生渲染：目标楼靠前时第一批就会出现，直接命中；
+            // 2) 1.5s 内未出现（目标楼靠后/被截断）→ 只渲染目标楼前后各 10 条（跳过前面大量消息）
             let el = null;
             let actualMesid = -1;
-            let renderTried = false;
+            let fastRendered = false;
             const jt0 = Date.now();
             while (Date.now() - jt0 < 10000) {
                 actualMesid = findMesidCandidates(r.msgIndex);
                 if (actualMesid >= 0) { el = document.querySelector('.mes[mesid="' + actualMesid + '"]'); break; }
-                if (!renderTried && Date.now() - jt0 > 800 && typeof redisplayChat === 'function') {
-                    renderTried = true;
+                if (!fastRendered && Date.now() - jt0 > 1500 && typeof redisplayChat === 'function') {
+                    fastRendered = true;
                     const savedTruncation = (typeof power_user !== 'undefined') ? power_user.chat_truncation : 0;
                     (async () => {
                         try {
                             power_user.chat_truncation = 0;
                             clearRendered();
-                            await withTimeout(redisplayChat({ startIndex: Math.max(0, r.msgIndex - 5), fade: false }), 12000, '渲染聊天');
+                            const startIndex = Math.max(0, r.msgIndex - 10);
+                            await withTimeout(redisplayChat({ startIndex: startIndex, fade: false }), 12000, '渲染聊天');
+                            // 只保留目标楼周围 ±10 条（渲染量最小化 → 跳转快）
+                            const endMesid = r.msgIndex + 10;
+                            document.querySelectorAll('#chat .mes').forEach(m => {
+                                if (Number(m.getAttribute('mesid')) > endMesid) m.remove();
+                            });
                         } catch (e) {
-                            console.warn('[chat-search] 渲染失败，尝试直接定位', e);
+                            console.warn('[chat-search] 快速渲染失败，继续轮询定位', e);
                         }
                         if (typeof power_user !== 'undefined') {
                             power_user.chat_truncation = savedTruncation;
