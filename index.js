@@ -1349,6 +1349,16 @@ import { power_user } from '../../../power-user.js';
             btn.addEventListener('click', openModal);
             document.body.appendChild(btn);
         }
+        // 聊天历史弹窗打开时：按钮隐藏（不占空间，回到首页/关弹窗自动恢复）
+        const popup = document.getElementById('select_chat_popup');
+        const popupShadow = document.getElementById('shadow_select_chat_popup');
+        const popupOpen = popup && getComputedStyle(popup).display !== 'none'
+            && (!popupShadow || getComputedStyle(popupShadow).display !== 'none');
+        if (popupOpen) {
+            btn.style.display = 'none';
+            btn.style.cssText = '';
+            return;
+        }
         // 按钮只在首页（总聊天列表 / 欢迎页"Recent Chats"）显示；
         // 进入角色聊天或打开聊天历史弹窗后不挂载、直接隐藏，不占空间。
         // 显隐由欢迎页容器控制（offsetParent 判断可见性），回到首页自动恢复。
