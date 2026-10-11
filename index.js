@@ -697,22 +697,33 @@ import { power_user } from '../../../power-user.js';
             // 点击即反馈：用户知道跳转在进行（ST 渲染聊天需要数秒，避免以为卡死）
             toastr.info('正在跳转到「' + r.charName + '」第 ' + r.msgIndex + ' 楼…', EXT_NAME, { timeOut: 4000 });
 
+            // 轻量切换角色：直接 setCharacterId + openCharacterChat（单次 getChat）。
+            // 不用 selectCharacterById（它内部会先 getChat 加载角色默认聊天，再 openCharacterChat 又 getChat 一次，
+            // 双重渲染是跳转慢的主因）；selectCharacterById 仅作为回退。
             const needSwitch = String(ctx.characterId) !== String(idx);
             if (needSwitch) {
+                let switched = false;
                 try {
-                    const sw = await withTimeout(ctx.selectCharacterById(idx), 8000, '切换角色');
-                    if (sw === '__TIMEOUT__') console.warn('[chat-search] 切换角色超时（继续尝试）');
+                    if (typeof setCharacterId === 'function') {
+                        // 离开群聊状态（openCharacterChat 针对单角色）
+                        if (typeof resetSelectedGroup === 'function' && window.SillyTavern.getContext().selected_group) {
+                            resetSelectedGroup();
+                        }
+                        setCharacterId(idx);
+                        if (typeof setCharacterName === 'function' && ctx.characters && ctx.characters[idx]) {
+                            setCharacterName(ctx.characters[idx].name);
+                        }
+                        switched = true;
+                    }
                 } catch (e) {
-                    console.warn('[chat-search] 切换角色异常（继续尝试）', e);
+                    console.warn('[chat-search] 轻量切换失败，回退 selectCharacterById', e);
                 }
-                // 验证切换成功：角色 ID 未更新则重试一次（ST 状态偶发污染时能自动恢复，避免卡死）
-                const cidNow = String((window.SillyTavern.getContext() || {}).characterId);
-                if (String(cidNow) !== String(idx)) {
+                if (!switched) {
                     try {
-                        const sw2 = await withTimeout(ctx.selectCharacterById(idx), 8000, '重试切换角色');
-                        if (sw2 === '__TIMEOUT__') console.warn('[chat-search] 重试切换角色超时');
+                        const sw = await withTimeout(ctx.selectCharacterById(idx), 8000, '切换角色');
+                        if (sw === '__TIMEOUT__') console.warn('[chat-search] 切换角色超时（继续尝试）');
                     } catch (e) {
-                        console.warn('[chat-search] 重试切换角色异常', e);
+                        console.warn('[chat-search] 切换角色异常（继续尝试）', e);
                     }
                 }
             }
