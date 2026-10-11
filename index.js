@@ -1214,7 +1214,11 @@ import { power_user } from '../../../power-user.js';
         buildStyle();
         await ensureCharsLoaded();
         await loadLiveChars(true);   // 每次打开弹窗都拉最新角色列表（新增角色卡后立即可筛）
-        buildModal();
+        if (!document.getElementById(ROOT_ID)) {
+            buildModal();
+        } else {
+            renderCharFilterUI();    // 弹窗已存在（复用）：刷新角色列表 UI，反映最新角色
+        }
         const modal = document.getElementById(ROOT_ID);
         modal.classList.add('open');
         const input = document.getElementById('chat-search-input');
