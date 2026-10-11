@@ -111,6 +111,12 @@ import { power_user } from '../../../power-user.js';
         });
     }
 
+    function escAttr(s) {
+        return String(s ?? '').replace(/[&"']/g, function (c) {
+            return { '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
     function humanTime(fileName) {
         // 文件名形如 "角色名 - 2026-05-11@09h35m56s993ms"
         const m = String(fileName).match(/(\d{4}-\d{2}-\d{2})@(\d{2})h(\d{2})m(\d{2})s/);
@@ -281,7 +287,13 @@ import { power_user } from '../../../power-user.js';
         renderResults(results, elapsed);
     }
 
-    // ---------- 渲染 ----------
+    // ---------- 渲染（角色分组 + 分页） ----------
+    let resultGroups = [];      // [{ charName, items: [result,...] }]
+    let resultPage = 1;         // 当前页码
+    const RESULT_PAGE_SIZE = 6; // 每页最多 6 个角色分组
+    const RESULT_GROUP_LIMIT = 6; // 单个角色展开后最多显示 6 条
+    let collapsedChars = new Set(); // 已折叠的角色名
+
     function renderResults(results, elapsed) {
         const listEl = document.getElementById('chat-search-results');
         const infoEl = document.getElementById('chat-search-info');
@@ -298,37 +310,95 @@ import { power_user } from '../../../power-user.js';
             listEl.innerHTML = '<div class="chat-search-empty">没有找到匹配内容，换个关键词试试</div>';
             return;
         }
-        const html = results.map((r, idx) => {
-            const who = r.isUser ? '用户' : '角色';
-            const swipeTag = r.swipeCount > 1 ? '<span class="cs-swipe">命中第 ' + (r.swipeId + 1) + '/' + r.swipeCount + ' 条候选</span>' : '';
-            const faved = isFavorite(r);
-            return '<div class="cs-item" data-idx="' + idx + '">' +
-                '<div class="cs-item-head">' +
-                '<span class="cs-char">' + escHtml(r.charName) + '</span>' +
-                '<span class="cs-date">' + escHtml(r.chatDate) + '</span>' +
-                '<span class="cs-floor">第 ' + (r.msgIndex + 1) + ' 楼</span>' +
-                '<span class="cs-who">' + who + '</span>' +
-                swipeTag +
-                '<span class="cs-fav-btn' + (faved ? ' faved' : '') + '" title="收藏此楼，之后可在「收藏」里直接跳转">' + (faved ? '★' : '☆') + '</span>' +
+        // 按角色分组（保持命中先后顺序，同一角色聚在一起）
+        const groups = [];
+        const map = new Map();
+        results.forEach((r, idx) => {
+            r.__gidx = idx;
+            if (!map.has(r.charName)) {
+                map.set(r.charName, []);
+                groups.push({ charName: r.charName, items: map.get(r.charName) });
+            }
+            map.get(r.charName).push(r);
+        });
+        resultGroups = groups;
+        resultPage = 1;
+        renderGroupPage();
+    }
+
+    function itemHtml(r) {
+        const who = r.isUser ? '用户' : '角色';
+        const swipeTag = r.swipeCount > 1 ? '<span class="cs-swipe">命中第 ' + (r.swipeId + 1) + '/' + r.swipeCount + ' 条候选</span>' : '';
+        const faved = isFavorite(r);
+        return '<div class="cs-item" data-idx="' + r.__gidx + '">' +
+            '<div class="cs-item-head">' +
+            '<span class="cs-date">' + escHtml(r.chatDate) + '</span>' +
+            '<span class="cs-floor">第 ' + (r.msgIndex + 1) + ' 楼</span>' +
+            '<span class="cs-who">' + who + '</span>' +
+            swipeTag +
+            '<span class="cs-fav-btn' + (faved ? ' faved' : '') + '" title="收藏此楼，之后可在「收藏」里直接跳转">' + (faved ? '★' : '☆') + '</span>' +
+            '</div>' +
+            '<div class="cs-snippet">' + escHtml(r.snippet) + '</div>' +
+            '</div>';
+    }
+
+    function renderGroupPage() {
+        const listEl = document.getElementById('chat-search-results');
+        if (!listEl) return;
+        const totalPages = Math.max(1, Math.ceil(resultGroups.length / RESULT_PAGE_SIZE));
+        if (resultPage > totalPages) resultPage = totalPages;
+        if (resultPage < 1) resultPage = 1;
+        const start = (resultPage - 1) * RESULT_PAGE_SIZE;
+        const pageGroups = resultGroups.slice(start, start + RESULT_PAGE_SIZE);
+
+        const html = pageGroups.map(g => {
+            const collapsed = collapsedChars.has(g.charName);
+            const shown = collapsed ? [] : g.items.slice(0, RESULT_GROUP_LIMIT);
+            const more = collapsed ? 0 : g.items.length - shown.length;
+            return '<div class="cs-group" data-char="' + escAttr(g.charName) + '">' +
+                '<div class="cs-group-head' + (collapsed ? '' : ' open') + '" title="点击展开/收起该角色的命中记录">' +
+                '<span class="cs-group-arrow">' + (collapsed ? '▶' : '▼') + '</span>' +
+                '<span class="cs-char">' + escHtml(g.charName) + '</span>' +
+                '<span class="cs-group-count">' + g.items.length + ' 条命中</span>' +
                 '</div>' +
-                '<div class="cs-snippet">' + escHtml(r.snippet) + '</div>' +
+                (collapsed ? '' :
+                    '<div class="cs-group-body">' +
+                    shown.map(itemHtml).join('') +
+                    (more > 0 ? '<div class="cs-group-more">该角色共 ' + g.items.length + ' 条命中，仅显示前 ' + RESULT_GROUP_LIMIT + ' 条，可用更精确的关键词缩小范围</div>' : '') +
+                    '</div>') +
                 '</div>';
         }).join('');
-        listEl.innerHTML = html;
-        // 绑定点击
+
+        listEl.innerHTML = html +
+            '<div class="cs-pager">' +
+            '<button type="button" id="cs-prev"' + (resultPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+            '<span class="cs-page-info">第 <input type="number" id="cs-page-input" min="1" max="' + totalPages + '" value="' + resultPage + '"> / ' + totalPages + ' 页</span>' +
+            '<button type="button" id="cs-next"' + (resultPage >= totalPages ? ' disabled' : '') + '>下一页</button>' +
+            '</div>';
+
+        // 分组头：展开/收起
+        listEl.querySelectorAll('.cs-group-head').forEach(el => {
+            el.addEventListener('click', () => {
+                const charName = el.closest('.cs-group').getAttribute('data-char');
+                if (collapsedChars.has(charName)) collapsedChars.delete(charName);
+                else collapsedChars.add(charName);
+                renderGroupPage();
+            });
+        });
+        // 结果项：直达
         listEl.querySelectorAll('.cs-item').forEach(el => {
             el.addEventListener('click', () => {
                 const idx = Number(el.getAttribute('data-idx'));
-                const r = results[idx];
+                const r = resultGroups.flatMap(g => g.items).find(x => x.__gidx === idx);
                 if (r) jumpTo(r);
             });
         });
-        // 绑定收藏按钮（阻止冒泡，不触发跳转）
+        // 收藏按钮（阻止冒泡，不触发跳转）
         listEl.querySelectorAll('.cs-fav-btn').forEach(el => {
             el.addEventListener('click', ev => {
                 ev.stopPropagation();
                 const idx = Number(el.closest('.cs-item').getAttribute('data-idx'));
-                const r = results[idx];
+                const r = resultGroups.flatMap(g => g.items).find(x => x.__gidx === idx);
                 if (r) {
                     toggleFavorite(r);
                     const faved = isFavorite(r);
@@ -337,6 +407,23 @@ import { power_user } from '../../../power-user.js';
                 }
             });
         });
+        // 翻页
+        const prevBtn = listEl.querySelector('#cs-prev');
+        const nextBtn = listEl.querySelector('#cs-next');
+        const pageInput = listEl.querySelector('#cs-page-input');
+        if (prevBtn) prevBtn.addEventListener('click', () => { if (resultPage > 1) { resultPage--; renderGroupPage(); } });
+        if (nextBtn) nextBtn.addEventListener('click', () => { if (resultPage < totalPages) { resultPage++; renderGroupPage(); } });
+        if (pageInput) {
+            const go = () => {
+                let v = parseInt(pageInput.value, 10);
+                if (isNaN(v)) { pageInput.value = resultPage; return; }
+                v = Math.max(1, Math.min(totalPages, v));
+                resultPage = v;
+                renderGroupPage();
+            };
+            pageInput.addEventListener('change', go);
+            pageInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
+        }
     }
 
     // ---------- 收藏列表 ----------
@@ -425,19 +512,22 @@ import { power_user } from '../../../power-user.js';
             }
             await ctx.openCharacterChat(r.chatFile);
 
-            // 处理「聊天截断显示」：目标楼层可能在未渲染的旧消息里
+            // 目标楼层可能在未渲染的旧消息里：临时关截断，一次性从目标前几楼渲染，
+            // 只渲染一次，避免二次重渲染导致滚动位置丢失（跳回 0 楼）
             const savedTruncation = (typeof power_user !== 'undefined') ? power_user.chat_truncation : 0;
             try {
                 if (typeof redisplayChat === 'function') {
-                    if (savedTruncation) {
-                        // 先全量渲染，确保目标存在
-                        power_user.chat_truncation = 0;
-                        clearRendered();
-                        await redisplayChat({ startIndex: 0, fade: false });
-                    }
+                    power_user.chat_truncation = 0;
+                    clearRendered();
+                    const startIndex = Math.max(0, r.msgIndex - 5);
+                    await redisplayChat({ startIndex: startIndex, fade: false });
                 }
             } catch (e) {
-                console.warn('[chat-search] 渲染全量失败，尝试直接定位', e);
+                console.warn('[chat-search] 渲染失败，尝试直接定位', e);
+            }
+            // 恢复截断设置（当前已渲染的 DOM 保留，不重渲染）
+            if (typeof power_user !== 'undefined') {
+                power_user.chat_truncation = savedTruncation;
             }
 
             const ok = await waitForMesid(r.msgIndex, 12000);
@@ -446,24 +536,15 @@ import { power_user } from '../../../power-user.js';
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 el.classList.add('chat-search-flash');
                 setTimeout(() => el.classList.remove('chat-search-flash'), 3000);
-            }
-
-            // 恢复截断：从目标楼层前 5 条开始渲染，保住目标在画面里
-            if (savedTruncation && typeof redisplayChat === 'function') {
-                try {
-                    power_user.chat_truncation = savedTruncation;
-                    clearRendered();
-                    const startIndex = Math.max(0, r.msgIndex - 5);
-                    await redisplayChat({ startIndex: startIndex, fade: false });
+                // 兜底：smooth 滚动偶尔会被 ST 渲染流程覆盖，延迟后再强制定位一次
+                setTimeout(() => {
                     const el2 = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
                     if (el2) {
                         el2.scrollIntoView({ behavior: 'auto', block: 'center' });
                         el2.classList.add('chat-search-flash');
                         setTimeout(() => el2.classList.remove('chat-search-flash'), 3000);
                     }
-                } catch (e) {
-                    console.warn('[chat-search] 恢复截断失败', e);
-                }
+                }, 400);
             }
 
             if (!ok) {
@@ -719,6 +800,40 @@ import { power_user } from '../../../power-user.js';
 .cs-floor { background:var(--SmartThemeBlurTintColor, rgba(128,128,128,.25)); border-radius:4px; padding:1px 6px; }
 .cs-who { opacity:.7; }
 .cs-swipe { color:#ffa657; font-size:11px; }
+.cs-group { margin:4px 0; border:1px solid var(--SmartThemeBorderColor, #444); border-radius:8px; overflow:hidden; }
+.cs-group-head {
+    display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer;
+    background:var(--SmartThemeBlurTintColor, rgba(128,128,128,.15)); font-size:13px; user-select:none;
+}
+.cs-group-head:hover { filter:brightness(1.15); }
+.cs-group-head.open { border-bottom:1px solid var(--SmartThemeBorderColor, #444); }
+.cs-group-arrow { font-size:10px; opacity:.8; transition:transform .2s; }
+.cs-group-count {
+    margin-left:auto; font-size:12px; opacity:.7;
+    background:var(--SmartThemeBlurTintColor, rgba(128,128,128,.25)); border-radius:10px; padding:1px 8px;
+}
+.cs-group-body { padding:2px 6px 6px; }
+.cs-group-body .cs-item { margin:4px 0; }
+.cs-group-more { padding:6px 10px; font-size:12px; opacity:.65; }
+.cs-pager {
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    padding:10px 0 4px; flex-wrap:wrap;
+}
+.cs-pager button {
+    padding:5px 14px; border-radius:6px; cursor:pointer; white-space:nowrap;
+    border:1px solid var(--SmartThemeBorderColor, #555);
+    background:var(--SmartThemeBlurTintColor, #3a3a4a);
+    color:var(--SmartThemeBodyColor, #eee); font-size:12px;
+}
+.cs-pager button:hover:not(:disabled) { filter:brightness(1.2); }
+.cs-pager button:disabled { opacity:.4; cursor:not-allowed; }
+.cs-page-info { font-size:12px; display:inline-flex; align-items:center; gap:4px; }
+#${ROOT_ID} #cs-page-input {
+    width:56px; padding:3px 6px; border-radius:6px; text-align:center;
+    border:1px solid var(--SmartThemeBorderColor, #555);
+    background:var(--SmartThemeBlurTintColor, #2a2a3a);
+    color:var(--SmartThemeBodyColor, #eee); font-size:12px;
+}
 .cs-snippet {
     margin-top:4px; font-size:13px; line-height:1.6;
     color:var(--SmartThemeBodyColor, #eee); opacity:.92;
