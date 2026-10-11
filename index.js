@@ -697,27 +697,29 @@ import { power_user } from '../../../power-user.js';
             // 等聊天数据渲染出来再重定位，避免过早渲染空列表
             await waitForChatReady(10000);
 
-            // 目标楼层可能在未渲染的旧消息里：临时关截断，一次性从目标前几楼渲染，
-            // 只渲染一次，避免二次重渲染导致滚动位置丢失（跳回 0 楼）
-            const savedTruncation = (typeof power_user !== 'undefined') ? power_user.chat_truncation : 0;
-            try {
-                if (typeof redisplayChat === 'function') {
+            // 先直接查目标楼（ST 原生渲染范围内通常已有，不打扰 ST 渲染流程/状态栏）；
+            // 只有目标楼在未渲染的旧消息里（聊天被截断）才临时补渲染一次
+            let el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
+            let ok = !!el;
+            if (!el && typeof redisplayChat === 'function') {
+                const savedTruncation = (typeof power_user !== 'undefined') ? power_user.chat_truncation : 0;
+                try {
                     power_user.chat_truncation = 0;
                     clearRendered();
                     const startIndex = Math.max(0, r.msgIndex - 5);
                     const rr = await withTimeout(redisplayChat({ startIndex: startIndex, fade: false }), 12000, '渲染聊天');
                     if (rr === '__TIMEOUT__') console.warn('[chat-search] 渲染聊天超时（继续尝试定位）');
+                } catch (e) {
+                    console.warn('[chat-search] 渲染失败，尝试直接定位', e);
                 }
-            } catch (e) {
-                console.warn('[chat-search] 渲染失败，尝试直接定位', e);
-            }
-            // 恢复截断设置（当前已渲染的 DOM 保留，不重渲染）
-            if (typeof power_user !== 'undefined') {
-                power_user.chat_truncation = savedTruncation;
+                // 恢复截断设置（当前已渲染的 DOM 保留，不重渲染）
+                if (typeof power_user !== 'undefined') {
+                    power_user.chat_truncation = savedTruncation;
+                }
+                ok = await waitForMesid(r.msgIndex, 12000);
+                el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
             }
 
-            const ok = await waitForMesid(r.msgIndex, 12000);
-            const el = document.querySelector('.mes[mesid="' + r.msgIndex + '"]');
             if (el) {
                 // 长消息（如代码/大段文本）定位到消息开头，避免落在中间看不到上下文；
                 // 普通消息定位到视口中央；滚动保底用同样的定位方式，防止被拉回中间
