@@ -6,7 +6,7 @@
 // 不改配置、不重启服务、不影响其他扩展。
 // ============================================================
 
-import { redisplayChat } from '../../../../script.js';
+import { redisplayChat, getCharacters } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 
 (function () {
@@ -35,6 +35,43 @@ import { power_user } from '../../../power-user.js';
     let favorites = [];   // [{avatar, charName, chatFile, msgIndex, snippet, favTime}]
     let lastSearchKeyword = '';   // 最近一次搜索的关键词（用于跳转后的金色高亮）
     let kwHighlightOn = false;    // 金色关键词高亮开关（再次点击结果时关闭）
+    let liveChars = null;         // 在线加载的全量角色列表（每次打开弹窗刷新，新增角色卡后立即可见）
+    let liveCharsLoading = false;
+
+    // 在线拉取全量角色列表（新增角色卡后无需刷新酒馆页面）
+    async function loadLiveChars(force) {
+        if (liveChars && !force) return liveChars;
+        if (liveCharsLoading) {
+            for (let i = 0; i < 40 && liveCharsLoading; i++) await new Promise(r => setTimeout(r, 250));
+            return liveChars || [];
+        }
+        liveCharsLoading = true;
+        try {
+            const resp = await fetch('/api/characters/all', {
+                method: 'POST',
+                headers: (typeof getRequestHeaders === 'function') ? getRequestHeaders() : {},
+                body: JSON.stringify({}),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                liveChars = (Array.isArray(data) ? data : [])
+                    .filter(c => c && c.avatar && c.avatar !== 'none')
+                    .map(c => ({ name: c.name, avatar: c.avatar, chat_size: c.chat_size }));
+            } else {
+                liveChars = null;
+            }
+        } catch (e) {
+            console.warn('[chat-search] 角色列表在线加载失败', e);
+            liveChars = null;
+        }
+        liveCharsLoading = false;
+        return liveChars || [];
+    }
+
+    // 当前有效的角色来源：在线列表优先，兜底 ST 上下文
+    function currentChars() {
+        return (liveChars && liveChars.length) ? liveChars : ((ctx && ctx.characters) || []);
+    }
 
     // ---------- 工具 ----------
     function loadJson(key, def) {
@@ -228,12 +265,12 @@ import { power_user } from '../../../power-user.js';
             renderResults([], 0);
             return;
         }
-        // 角色列表可能还在加载，最多等 12 秒
-        let allChars = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none');
+        // 角色列表：在线加载优先（最新，含新增角色卡），兜底 ST 上下文；最多等 12 秒
+        let allChars = currentChars().filter(c => c.avatar && c.avatar !== 'none');
         for (let w = 0; w < 24 && allChars.length === 0; w++) {
             await new Promise(res => setTimeout(res, 500));
             ctx = window.SillyTavern.getContext();
-            allChars = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none');
+            allChars = currentChars().filter(c => c.avatar && c.avatar !== 'none');
         }
         // 角色筛选：选中了角色就只搜这些角色（同名卡一起选中的都在集合里，含无聊天卡也快速跳过），
         // 否则只扫有聊天记录的角色，跳过无聊天角色省时间
@@ -611,7 +648,17 @@ import { power_user } from '../../../power-user.js';
     async function jumpTo(r) {
         try {
             ctx = window.SillyTavern.getContext();
-            const idx = (ctx.characters || []).findIndex(c => c.avatar === r.avatar);
+            let idx = (ctx.characters || []).findIndex(c => c.avatar === r.avatar);
+            if (idx < 0 && typeof getCharacters === 'function') {
+                // ST 上下文里没有该角色（页面加载后新增的角色卡）：刷新 ST 角色列表再找
+                try {
+                    await getCharacters();
+                    ctx = window.SillyTavern.getContext();
+                    idx = (ctx.characters || []).findIndex(c => c.avatar === r.avatar);
+                } catch (e) {
+                    console.warn('[chat-search] 刷新角色列表失败', e);
+                }
+            }
             if (idx < 0) {
                 toastr.warning('找不到该角色', EXT_NAME);
                 return;
@@ -655,8 +702,8 @@ import { power_user } from '../../../power-user.js';
                 startScrollGuard(r.msgIndex, 8000);
             }
 
-            // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启
-            toggleKwHighlight();
+            // 金色关键词高亮：同一关键词再次点击结果 → 关闭；不同关键词 → 开启（仅跳转成功时）
+            if (ok) toggleKwHighlight();
 
             if (!ok) {
                 toastr.info('已打开该聊天，但没找到目标楼层（可能被合并/删除）', EXT_NAME);
@@ -717,7 +764,7 @@ import { power_user } from '../../../power-user.js';
         const chipsWrap = box.querySelector('.cs-chips');
         if (chipsWrap) {
             chipsWrap.innerHTML = '';
-            const all = (ctx.characters || []);
+            const all = currentChars();
             if (selectedChars.size === 0) {
                 const s = document.createElement('span');
                 s.className = 'cs-chip cs-chip-all';
@@ -752,7 +799,7 @@ import { power_user } from '../../../power-user.js';
         if (!list) return;
         const q = document.getElementById('chat-search-char-q');
         const kw = q ? q.value.trim().toLowerCase() : '';
-        const all = (ctx.characters || []).filter(c => c.avatar && c.avatar !== 'none');
+        const all = currentChars().filter(c => c.avatar && c.avatar !== 'none');
         if (all.length === 0) {
             // 角色还在加载：显示提示并稍后自动重绘
             list.innerHTML = '<div class="cs-char-empty">角色列表加载中…</div>';
@@ -1128,7 +1175,7 @@ import { power_user } from '../../../power-user.js';
         q.addEventListener('click', ev => ev.stopPropagation());
         div.querySelector('#chat-search-char-all').addEventListener('click', ev => {
             ev.stopPropagation();
-            const chars = (ctx.characters || [])
+            const chars = currentChars()
                 .filter(c => c.avatar && c.avatar !== 'none');
             selectedChars = new Set(chars.map(c => c.avatar));
             saveFilters();
@@ -1166,6 +1213,7 @@ import { power_user } from '../../../power-user.js';
     async function openModal() {
         buildStyle();
         await ensureCharsLoaded();
+        await loadLiveChars(true);   // 每次打开弹窗都拉最新角色列表（新增角色卡后立即可筛）
         buildModal();
         const modal = document.getElementById(ROOT_ID);
         modal.classList.add('open');
