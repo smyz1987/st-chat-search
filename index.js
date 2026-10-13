@@ -32,6 +32,7 @@ import { power_user } from '../../../power-user.js';
     const FAV_KEY = 'chat-search-favorites';
     let selectedChars = new Set();
     let excludeUser = false;
+    let excludeChar = false;
     let favorites = [];   // [{avatar, charName, chatFile, msgIndex, snippet, favTime}]
     let lastSearchKeyword = '';   // 最近一次搜索的关键词（用于跳转后的金色高亮）
     let kwHighlightOn = false;    // 金色关键词高亮开关（再次点击结果时关闭）
@@ -86,6 +87,7 @@ import { power_user } from '../../../power-user.js';
             localStorage.setItem(FILTER_KEY, JSON.stringify({
                 chars: Array.from(selectedChars),
                 excludeUser: !!excludeUser,
+                excludeChar: !!excludeChar,
             }));
         } catch { /* 忽略 */ }
     }
@@ -216,11 +218,13 @@ import { power_user } from '../../../power-user.js';
     function searchLines(lines, frags, opts) {
         if (!Array.isArray(lines) || frags.length === 0) return [];
         const excludeUser = !!(opts && opts.excludeUser);
+        const excludeChar = !!(opts && opts.excludeChar);
         const hits = [];
         for (let i = 0; i < lines.length; i++) {
             const m = lines[i];
             if (!m || typeof m !== 'object' || m.chat_metadata) continue;
             if (excludeUser && m.is_user) continue;
+            if (excludeChar && !m.is_user) continue;
             const texts = [];
             if (typeof m.mes === 'string') texts.push(m.mes);
             if (Array.isArray(m.swipes)) texts.push(...m.swipes.filter(x => typeof x === 'string'));
@@ -306,7 +310,7 @@ import { power_user } from '../../../power-user.js';
                             lines = await apiChatsGet(c.avatar, file);
                             setMessageCache(key, lines);
                         }
-                        const hits = searchLines(lines, frags, { excludeUser: excludeUser });
+                        const hits = searchLines(lines, frags, { excludeUser: excludeUser, excludeChar: excludeChar });
                         for (const h of hits) {
                             results.push({
                                 avatar: c.avatar,
@@ -347,10 +351,11 @@ import { power_user } from '../../../power-user.js';
         const infoEl = document.getElementById('chat-search-info');
         if (!listEl || !infoEl) return;
         let filterNote = '';
-        if (selectedChars.size > 0 || excludeUser) {
+        if (selectedChars.size > 0 || excludeUser || excludeChar) {
             const parts = [];
             if (selectedChars.size > 0) parts.push('已选 ' + selectedChars.size + ' 个角色');
             if (excludeUser) parts.push('排除用户消息');
+            if (excludeChar) parts.push('排除角色消息');
             filterNote = '（筛选：' + parts.join(' · ') + '）';
         }
         infoEl.textContent = '共 ' + results.length + ' 条命中' + (elapsed ? '，耗时 ' + elapsed + 's' : '') + filterNote;
@@ -833,6 +838,11 @@ import { power_user } from '../../../power-user.js';
         saveFilters();
     }
 
+    function setExcludeChar(v) {
+        excludeChar = !!v;
+        saveFilters();
+    }
+
     function toggleChar(avatar) {
         if (selectedChars.has(avatar)) {
             selectedChars.delete(avatar);
@@ -1196,6 +1206,7 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
             if (saved) {
                 selectedChars = new Set(Array.isArray(saved.chars) ? saved.chars : []);
                 excludeUser = !!saved.excludeUser;
+                excludeChar = !!saved.excludeChar;
             }
         } catch { /* 忽略 */ }
         const div = document.createElement('div');
@@ -1223,6 +1234,7 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
       <span class="cs-char-caret">▾</span>
     </button>
     <label class="cs-exclude-user"><input type="checkbox" id="chat-search-exclude-user" /> 排除用户消息</label>
+    <label class="cs-exclude-user"><input type="checkbox" id="chat-search-exclude-char" /> 排除角色消息</label>
   </div>
   <div id="chat-search-char-dd" class="cs-char-dd">
     <div class="cs-char-dd-head">
@@ -1253,6 +1265,7 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
         const dd = div.querySelector('#chat-search-char-dd');
         const q = div.querySelector('#chat-search-char-q');
         const exUser = div.querySelector('#chat-search-exclude-user');
+        const exChar = div.querySelector('#chat-search-exclude-char');
 
         // 搜索 / 收藏 tab
         const tabSearch = div.querySelector('#chat-search-tab-search');
@@ -1274,6 +1287,8 @@ body:has(#select_chat_popup[style*="display:flex"]) #${BTN_ID} { display:none !i
         // 角色多选交互
         exUser.checked = excludeUser;
         exUser.addEventListener('change', () => setExcludeUser(exUser.checked));
+        exChar.checked = excludeChar;
+        exChar.addEventListener('change', () => setExcludeChar(exChar.checked));
         const filterToggle = div.querySelector('#chat-search-filter-toggle');
         filterToggle.addEventListener('click', ev => {
             ev.stopPropagation();
